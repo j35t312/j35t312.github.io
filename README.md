@@ -1,2 +1,2 @@
-# JAVAScript-calendar
-calendar done just with js
+# JAVAScript - Calendar Viewer
+Calendar Viewer done just with js
