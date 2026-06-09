@@ -278,14 +278,24 @@
                 }
                 const data = await response.json();
 
-                // Dynamic timezone extraction
+                // Extract timezone
                 if (data.timezone) {
                     CONFIG_TIMEZONE = data.timezone;
                 }
 
                 const feeds = data.ics_feeds || [];
                 if (feeds && Array.isArray(feeds) && feeds.length > 0) {
-                    CONFIG_ICS_URL = feeds[0].ics_url || null;
+                    let rawUrl = feeds[0].ics_url || null;
+                    
+                    // SMART CORS PROXY DETECTION:
+                    // If running on GitHub Pages (.github.io), apply the AllOrigins proxy wrapper.
+                    // If running locally (localhost, 127.0.0.1, or file://), use the raw URL.
+                    if (rawUrl && window.location.hostname.includes('github.io')) {
+                        CONFIG_ICS_URL = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(rawUrl);
+                    } else {
+                        CONFIG_ICS_URL = rawUrl;
+                    }
+                    
                 } else {
                     CONFIG_ICS_URL = null;
                 }
