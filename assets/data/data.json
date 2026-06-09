@@ -1,0 +1,9 @@
+{
+  "timezone": "America/Edmonton",
+  "ics_feeds": [
+    {
+      "ics_url": "https://ahs-wfm.st.inforcloudsuite.com/public/ical/d0f5ba41-ef6d-4535-b517-0f3127113d01/myschedule.ics",
+      "uid_prefix": "ICS-"
+    }
+  ]
+}
