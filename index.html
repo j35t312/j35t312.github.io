@@ -274,34 +274,25 @@
 
                 const response = await fetch(jsonFilePath);
                 if (!response.ok) {
-                    throw new Error('Failed to fetch config: ' + response.status);
+                    throw new Error('Failed to fetch data.json: ' + response.status);
                 }
                 const data = await response.json();
 
-                // Extract timezone
+                // Extract timezone from your JSON config
                 if (data.timezone) {
                     CONFIG_TIMEZONE = data.timezone;
                 }
 
+                // Extract the ICS URL path specified in your JSON config
                 const feeds = data.ics_feeds || [];
                 if (feeds && Array.isArray(feeds) && feeds.length > 0) {
-                    let rawUrl = feeds[0].ics_url || null;
-                    
-                    // SMART CORS PROXY DETECTION:
-                    // If running on GitHub Pages (.github.io), apply the AllOrigins proxy wrapper.
-                    // If running locally (localhost, 127.0.0.1, or file://), use the raw URL.
-                    if (rawUrl && window.location.hostname.includes('github.io')) {
-                        CONFIG_ICS_URL = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(rawUrl);
-                    } else {
-                        CONFIG_ICS_URL = rawUrl;
-                    }
-                    
+                    CONFIG_ICS_URL = feeds[0].ics_url || null;
                 } else {
                     CONFIG_ICS_URL = null;
                 }
             } catch (e) {
                 CONFIG_ICS_URL = null;
-                console.log('Error reading configuration: ' + e.message);
+                console.log('Error reading configuration setup: ' + e.message);
             }
         }
 
@@ -389,7 +380,7 @@
                     this.statusLabel.textContent = 'Connecting...';
                     this.fetchCalendarData();
                 } else {
-                    this.statusLabel.textContent = 'Error: No calendar URL configured.';
+                    this.statusLabel.textContent = 'Error: No calendar path configured.';
                 }
             }
 
@@ -409,17 +400,18 @@
                 try {
                     this.loadingLock = true;
 
+                    // Fetch the local .ics file
                     const response = await fetch(this.icsUrl, {
                         signal: AbortSignal.timeout(15000)
                     });
                     if (!response.ok) {
-                        throw new Error('HTTP error! status: ' + response.status);
+                        throw new Error('HTTP error! Status: ' + response.status);
                     }
 
                     let icsText = (await response.text()).trim();
 
                     if (!icsText.startsWith('BEGIN:VCALENDAR')) {
-                        throw new Error('Downloaded file is not a valid iCalendar feed.');
+                        throw new Error('The target file is not a valid iCalendar feed.');
                     }
 
                     const calendar = new Calendar(icsText);
@@ -442,8 +434,8 @@
 
                 } catch (err) {
                     this.loadingLock = false;
-                    this.statusLabel.textContent = 'Failed to load.';
-                    this.showErrorDialog('Network Error', String(err));
+                    this.statusLabel.textContent = 'Failed to load file.';
+                    this.showErrorDialog('File Loading Error', String(err));
                 }
             }
 
@@ -584,7 +576,6 @@
         // ---- 3. Execution ----
         async function main() {
             await loadConfiguration();
-            // Passing both CONFIG_ICS_URL and CONFIG_TIMEZONE dynamically parsed from data.json
             const app = new CalendarApp(CONFIG_ICS_URL, CONFIG_TIMEZONE);
             app.initializeLoad();
         }
