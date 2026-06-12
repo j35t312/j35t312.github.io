@@ -101,12 +101,12 @@
             cursor: pointer;
             font-size: 14px;
             font-family: inherit;
-            transition: background-color 0.2s, box-shadow 0.2s;
+            transition: all 0.2s;
             flex: 1;
             justify-content: center;
         }
 
-        .action-btn:hover {
+        .action-btn:hover:not(:disabled) {
             background-color: #f5f5f5;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
         }
@@ -245,10 +245,10 @@
         <div class="header-row" id="header-row">
             <span class="header-title">Schedule Navigation</span>
             <div class="header-actions" id="header-actions">
-                <button class="icon-btn refresh-btn" id="refresh-btn" title="Clear/Refresh Data">
+                <button class="icon-btn refresh-btn" id="refresh-btn" title="Reset to Today">
                     <span class="material-icons">refresh</span>
                 </button>
-                <button class="icon-btn exit-btn" id="exit-btn" title="Exit Application">
+                <button class="icon-btn exit-btn" id="exit-btn" title="Clear Data & Reset">
                     <span class="material-icons">close</span>
                 </button>
             </div>
@@ -320,14 +320,14 @@
             }
 
             createWidgets() {
-                // File Upload Bindings
+                // File Upload Setup
                 this.fileInput = document.getElementById('hidden-file-input');
                 this.fileInput.addEventListener('change', (e) => this.onFileUploaded(e));
 
                 this.uploadBtn = document.getElementById('upload-ics-btn');
                 this.uploadBtn.addEventListener('click', () => this.fileInput.click());
 
-                // Date Picker Bindings
+                // Date Picker Setup
                 this.datePicker = document.getElementById('hidden-date-input');
                 this.datePicker.addEventListener('change', (e) => this.onDateSelected(e));
 
@@ -344,6 +344,11 @@
 
                 this.dateHeader = document.getElementById('date-header');
                 this.detailsColumn = document.getElementById('details-column');
+
+                // Apply initial disabled state rules to the Date button
+                this.selectDateBtn.disabled = true;
+                this.selectDateBtn.style.opacity = '0.5';
+                this.selectDateBtn.style.cursor = 'not-allowed';
             }
 
             openDatePicker() {
@@ -355,21 +360,47 @@
                 }
             }
 
-            exitApplication(e) {
-                if (typeof window.close === 'function') {
-                    window.close();
+            triggerRefresh(e) {
+                // Clear the value out of the native date picker interface element
+                this.datePicker.value = '';
+
+                // 1. Snapshot today's date
+                const today = new Date();
+                // 2. Normalize to midnight to eliminate local timezone offset mismatches
+                today.setHours(0, 0, 0, 0);
+                
+                this.currentSelectedDate = today;
+                
+                // 3. Inform status contextual to internal memory status
+                if (Object.keys(this.eventsByDate).length > 0) {
+                    this.statusLabel.textContent = "Refreshed view to today's date.";
+                } else {
+                    this.statusLabel.textContent = 'Please upload an iCalendar (.ics) file to begin.';
                 }
+                
+                // 4. Force immediate schedule viewport refresh
+                this.displayShiftsForDate(this.currentSelectedDate, true);
             }
 
-            triggerRefresh(e) {
-                this.fileInput.value = ''; // Reset file input
-                this.eventsByDate = {};
+            exitApplication(e) {
+                // Clear the value out of the native date picker interface element
+                this.datePicker.value = '';
+
+                // Perform total data reset
+                this.fileInput.value = ''; 
+                this.eventsByDate = {}; 
+                this.currentSelectedDate = new Date(); 
+                
+                // Reinstate interactive restrictions on the date selector
+                this.selectDateBtn.disabled = true;
+                this.selectDateBtn.style.opacity = '0.5';
+                this.selectDateBtn.style.cursor = 'not-allowed';
+
                 this.detailsColumn.innerHTML = '';
                 this.dateHeader.textContent = 'Select a date';
                 this.statusLabel.textContent = 'Data cleared. Please upload an iCalendar (.ics) file.';
             }
 
-            // Handle the manual file selection
             onFileUploaded(e) {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -402,7 +433,11 @@
                         this.eventsByDate = temporaryEvents;
                         this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts from "' + file.name + '"';
 
-                        // Display shifts for the active date selection
+                        // Business Rule: Enable choose date controls post-parsing
+                        this.selectDateBtn.disabled = false;
+                        this.selectDateBtn.style.opacity = '1';
+                        this.selectDateBtn.style.cursor = 'pointer';
+
                         this.displayShiftsForDate(this.currentSelectedDate, false);
 
                     } catch (err) {
@@ -558,10 +593,7 @@
 
         // ---- Execution ----
         document.addEventListener('DOMContentLoaded', function() {
-            // Instantiating with your default local timezone directly
             const app = new CalendarApp('America/Edmonton');
-            
-            // Set initial state to prompt user for action
             app.displayShiftsForDate(new Date(), false);
         });
     </script>
