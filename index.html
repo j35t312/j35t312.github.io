@@ -84,7 +84,13 @@
             color: var(--red-accent);
         }
 
-        .select-date-btn {
+        .action-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .action-btn {
             display: inline-flex;
             align-items: center;
             gap: 8px;
@@ -96,20 +102,21 @@
             font-size: 14px;
             font-family: inherit;
             transition: background-color 0.2s, box-shadow 0.2s;
-            margin-bottom: 8px;
+            flex: 1;
+            justify-content: center;
         }
 
-        .select-date-btn:hover {
+        .action-btn:hover {
             background-color: #f5f5f5;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
         }
 
-        .select-date-btn .material-icons {
+        .action-btn .material-icons {
             font-size: 18px;
             color: #616161;
         }
 
-        #hidden-date-input {
+        #hidden-file-input, #hidden-date-input {
             position: absolute;
             opacity: 0;
             pointer-events: none;
@@ -238,7 +245,7 @@
         <div class="header-row" id="header-row">
             <span class="header-title">Schedule Navigation</span>
             <div class="header-actions" id="header-actions">
-                <button class="icon-btn refresh-btn" id="refresh-btn" title="Refresh Schedule">
+                <button class="icon-btn refresh-btn" id="refresh-btn" title="Clear/Refresh Data">
                     <span class="material-icons">refresh</span>
                 </button>
                 <button class="icon-btn exit-btn" id="exit-btn" title="Exit Application">
@@ -246,56 +253,28 @@
                 </button>
             </div>
         </div>
-        <button class="select-date-btn" id="select-date-btn">
-            <span class="material-icons">date_range</span>
-            &#x1F4C5; Choose Date
-        </button>
+
+        <div class="action-container">
+            <button class="action-btn" id="upload-ics-btn">
+                <span class="material-icons">upload_file</span>
+                Upload ICS
+            </button>
+            <button class="action-btn" id="select-date-btn">
+                <span class="material-icons">date_range</span>
+                Choose Date
+            </button>
+        </div>
+
+        <input type="file" id="hidden-file-input" accept=".ics">
         <input type="date" id="hidden-date-input" min="2025-01-01" max="2030-12-31">
-        <div class="status-label" id="status-label">Ready</div>
+
+        <div class="status-label" id="status-label">Please upload an iCalendar (.ics) file to begin.</div>
         <hr class="divider">
         <div class="date-header" id="date-header">Select a date</div>
         <div class="details-column" id="details-column"></div>
     </div>
 
     <script>
-        // ---- Helper: get assets directory ----
-        function getAssetsDir() {
-            return './assets';
-        }
-
-        // ---- 1. Configuration & Data Loading ----
-        let CONFIG_ICS_URL = null;
-        let CONFIG_TIMEZONE = 'America/Edmonton'; // Fallback default
-
-        async function loadConfiguration() {
-            try {
-                const assetsDir = getAssetsDir();
-                const jsonFilePath = assetsDir + '/data/data.json';
-
-                const response = await fetch(jsonFilePath);
-                if (!response.ok) {
-                    throw new Error('Failed to fetch data.json: ' + response.status);
-                }
-                const data = await response.json();
-
-                // Extract timezone from your JSON config
-                if (data.timezone) {
-                    CONFIG_TIMEZONE = data.timezone;
-                }
-
-                // Extract the ICS URL path specified in your JSON config
-                const feeds = data.ics_feeds || [];
-                if (feeds && Array.isArray(feeds) && feeds.length > 0) {
-                    CONFIG_ICS_URL = feeds[0].ics_url || null;
-                } else {
-                    CONFIG_ICS_URL = null;
-                }
-            } catch (e) {
-                CONFIG_ICS_URL = null;
-                console.log('Error reading configuration setup: ' + e.message);
-            }
-        }
-
         // ---- ICS Calendar wrapper ----
         class Calendar {
             constructor(icsText) {
@@ -320,14 +299,13 @@
             }
         }
 
-        // ---- 2. Application UI and Logic ----
+        // ---- Application UI and Logic ----
         class CalendarApp {
-            constructor(urlAddress, timezone) {
-                this.icsUrl = urlAddress;
+            constructor(timezone) {
                 this.eventsByDate = {};
                 this.localTz = timezone || 'America/Edmonton';
-
                 this.loadingLock = false;
+                this.currentSelectedDate = new Date();
 
                 this.page = {
                     title: 'Schedule Viewer',
@@ -342,6 +320,14 @@
             }
 
             createWidgets() {
+                // File Upload Bindings
+                this.fileInput = document.getElementById('hidden-file-input');
+                this.fileInput.addEventListener('change', (e) => this.onFileUploaded(e));
+
+                this.uploadBtn = document.getElementById('upload-ics-btn');
+                this.uploadBtn.addEventListener('click', () => this.fileInput.click());
+
+                // Date Picker Bindings
                 this.datePicker = document.getElementById('hidden-date-input');
                 this.datePicker.addEventListener('change', (e) => this.onDateSelected(e));
 
@@ -375,79 +361,67 @@
                 }
             }
 
-            initializeLoad() {
-                if (this.icsUrl) {
-                    this.statusLabel.textContent = 'Connecting...';
-                    this.fetchCalendarData();
-                } else {
-                    this.statusLabel.textContent = 'Error: No calendar path configured.';
-                }
-            }
-
             triggerRefresh(e) {
-                if (!this.loadingLock && this.icsUrl) {
-                    this.statusLabel.textContent = 'Refreshing...';
-                    this.detailsColumn.innerHTML = '';
-                    this.fetchCalendarData();
-                }
+                this.fileInput.value = ''; // Reset file input
+                this.eventsByDate = {};
+                this.detailsColumn.innerHTML = '';
+                this.dateHeader.textContent = 'Select a date';
+                this.statusLabel.textContent = 'Data cleared. Please upload an iCalendar (.ics) file.';
             }
 
-            async fetchCalendarData() {
-                if (this.loadingLock) {
-                    return;
-                }
+            // Handle the manual file selection
+            onFileUploaded(e) {
+                const file = e.target.files[0];
+                if (!file) return;
 
-                try {
-                    this.loadingLock = true;
+                this.statusLabel.textContent = 'Reading file...';
+                this.detailsColumn.innerHTML = '';
 
-                    // Fetch the local .ics file
-                    const response = await fetch(this.icsUrl, {
-                        signal: AbortSignal.timeout(15000)
-                    });
-                    if (!response.ok) {
-                        throw new Error('HTTP error! Status: ' + response.status);
-                    }
+                const reader = new FileReader();
+                
+                reader.onload = (event) => {
+                    try {
+                        let icsText = event.target.result.trim();
 
-                    let icsText = (await response.text()).trim();
-
-                    if (!icsText.startsWith('BEGIN:VCALENDAR')) {
-                        throw new Error('The target file is not a valid iCalendar feed.');
-                    }
-
-                    const calendar = new Calendar(icsText);
-                    const temporaryEvents = {};
-
-                    for (const event of calendar.events) {
-                        const localBegin = event.begin.datetime; 
-                        const dateStr = this._formatDateInTimezone(localBegin, this.localTz);
-                        if (!temporaryEvents[dateStr]) {
-                            temporaryEvents[dateStr] = [];
+                        if (!icsText.startsWith('BEGIN:VCALENDAR')) {
+                            throw new Error('The target file is not a valid iCalendar feed.');
                         }
-                        temporaryEvents[dateStr].push(event);
+
+                        const calendar = new Calendar(icsText);
+                        const temporaryEvents = {};
+
+                        for (const event of calendar.events) {
+                            const localBegin = event.begin.datetime; 
+                            const dateStr = this._formatDateInTimezone(localBegin, this.localTz);
+                            if (!temporaryEvents[dateStr]) {
+                                temporaryEvents[dateStr] = [];
+                            }
+                            temporaryEvents[dateStr].push(event);
+                        }
+
+                        this.eventsByDate = temporaryEvents;
+                        this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts from "' + file.name + '"';
+
+                        // Display shifts for the active date selection
+                        this.displayShiftsForDate(this.currentSelectedDate, false);
+
+                    } catch (err) {
+                        this.statusLabel.textContent = 'Failed to parse file.';
+                        this.showErrorDialog('File Loading Error', String(err));
                     }
+                };
 
-                    this.eventsByDate = temporaryEvents;
-                    this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts.';
-                    this.loadingLock = false;
+                reader.onerror = () => {
+                    this.statusLabel.textContent = 'Failed to read file.';
+                    this.showErrorDialog('File System Error', 'Could not read local file records.');
+                };
 
-                    this.displayShiftsForDate(new Date(), false);
-
-                } catch (err) {
-                    this.loadingLock = false;
-                    this.statusLabel.textContent = 'Failed to load file.';
-                    this.showErrorDialog('File Loading Error', String(err));
-                }
+                reader.readAsText(file);
             }
 
             onDateSelected(e) {
-                if (this.loadingLock) {
-                    return;
-                }
-
                 let selectedValue = e.target ? e.target.value : this.datePicker.value;
-                if (!selectedValue) {
-                    return;
-                }
+                if (!selectedValue) return;
 
                 if (typeof selectedValue === 'string') {
                     try {
@@ -467,6 +441,7 @@
                     }
                 }
 
+                this.currentSelectedDate = selectedValue;
                 this.displayShiftsForDate(selectedValue, true);
             }
 
@@ -474,6 +449,14 @@
                 const dateKey = this._formatDateInTimezone(targetDate, this.localTz);
                 this.dateHeader.textContent = this._formatDateHeader(targetDate, this.localTz);
                 this.detailsColumn.innerHTML = '';
+
+                if (Object.keys(this.eventsByDate).length === 0) {
+                    const promptUploadDiv = document.createElement('div');
+                    promptUploadDiv.className = 'no-shifts';
+                    promptUploadDiv.textContent = 'No data available. Please upload an .ics file first.';
+                    this.detailsColumn.appendChild(promptUploadDiv);
+                    return;
+                }
 
                 if (dateKey in this.eventsByDate) {
                     const dayEvents = [...this.eventsByDate[dateKey]].sort(
@@ -573,15 +556,13 @@
             }
         }
 
-        // ---- 3. Execution ----
-        async function main() {
-            await loadConfiguration();
-            const app = new CalendarApp(CONFIG_ICS_URL, CONFIG_TIMEZONE);
-            app.initializeLoad();
-        }
-
+        // ---- Execution ----
         document.addEventListener('DOMContentLoaded', function() {
-            main();
+            // Instantiating with your default local timezone directly
+            const app = new CalendarApp('America/Edmonton');
+            
+            // Set initial state to prompt user for action
+            app.displayShiftsForDate(new Date(), false);
         });
     </script>
 </body>
