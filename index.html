@@ -267,7 +267,7 @@
             </button>
             <button class="action-btn" id="select-date-btn">
                 <span class="material-icons">date_range</span>
-                Choose Dategjhbjh
+                Choose Date
             </button>
         </div>
 
@@ -337,7 +337,6 @@
                 this.dateHeader = document.getElementById('date-header');
                 this.detailsColumn = document.getElementById('details-column');
 
-                // Apply initial disabled security boundary rules
                 this.selectDateBtn.disabled = true;
                 this.selectDateBtn.style.opacity = '0.5';
                 this.selectDateBtn.style.cursor = 'not-allowed';
@@ -411,12 +410,10 @@
                         this.eventsByDate = temporaryEvents;
                         this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts from "' + file.name + '"';
 
-                        // Business Rule: Enable conditional date filtering
                         this.selectDateBtn.disabled = false;
                         this.selectDateBtn.style.opacity = '1';
                         this.selectDateBtn.style.cursor = 'pointer';
 
-                        // Instantly default view to today's schedule bounds
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);
                         this.currentSelectedDate = today;
@@ -510,17 +507,46 @@
             }
         }
 
-        // ---- 3. Service Worker Lifecycle Management ----
+        // ---- 3. Auto-Updating Service Worker Lifecycle ----
         document.addEventListener('DOMContentLoaded', function() {
             const app = new CalendarApp('America/Edmonton');
             app.displayShiftsForDate(new Date(), false);
 
-            // Conditional Service Worker registration layer
             if ('serviceWorker' in navigator) {
+                let refreshing = false;
+
+                // Listen for controllerchange. When a new service worker claims control, reload the app.
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (!refreshing) {
+                        refreshing = true;
+                        window.location.reload();
+                    }
+                });
+
                 window.addEventListener('load', () => {
                     navigator.serviceWorker.register('./sw.js')
-                        .then(reg => console.log('Service Worker ready! Scope layout is:', reg.scope))
-                        .catch(err => console.error('Service Worker activation barrier encountered:', err));
+                        .then((reg) => {
+                            console.log('Service Worker registered. Scope:', reg.scope);
+
+                            // Check for updates on an interval or tab focus
+                            setInterval(() => { reg.update(); }, 60000 * 5); // check every 5 minutes
+
+                            // Handle update logic if a service worker is waiting
+                            if (reg.waiting) {
+                                reg.waiting.postMessage('SKIP_WAITING');
+                            }
+
+                            reg.addEventListener('updatefound', () => {
+                                const newWorker = reg.installing;
+                                newWorker.addEventListener('statechange', () => {
+                                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                        // New code version is fully cached. Tell it to take control.
+                                        newWorker.postMessage('SKIP_WAITING');
+                                    }
+                                });
+                            });
+                        })
+                        .catch((err) => console.error('Service worker initialization failure:', err));
                 });
             }
         });
