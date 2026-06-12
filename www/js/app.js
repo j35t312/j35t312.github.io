@@ -1,416 +1,295 @@
-// ---- 1. Configuration & Data Loading ----
-let CONFIG_ICS_URL = null;
-let CONFIG_TIMEZONE = 'America/Edmonton'; 
+/**
+ * Schedule Viewer - Cordova App Logic
+ */
 
-function getNativeIcsPath() {
-    if (window.cordova) {
-        // App sandbox fallback path for automatic startup load
-        return cordova.file.dataDirectory + 'myschedule.ics';
-    } else if (window.Capacitor) {
-        return 'myschedule.ics'; 
+// --- Constants & Configuration ---
+const FILE_NAME = "schedule.ics";
+
+// --- Global App State ---
+let appState = {
+    selectedDate: null, // Date object
+    allEvents: []       // Parsed event objects
+};
+
+// --- DOM Elements ---
+const el = {
+    loadFileBtn: document.getElementById('load-file-btn'),
+    refreshBtn: document.getElementById('refresh-btn'),
+    exitBtn: document.getElementById('exit-btn'),
+    selectDateBtn: document.getElementById('select-date-btn'),
+    dateInput: document.getElementById('hidden-date-input'),
+    statusLabel: document.getElementById('status-label'),
+    dateHeader: document.getElementById('date-header'),
+    detailsColumn: document.getElementById('details-column')
+};
+
+// --- Initialization ---
+document.addEventListener('deviceready', onDeviceReady, false);
+
+// Fallback initialization if running outside of Cordova (e.g., standard browser testing)
+setTimeout(() => {
+    if (!window.cordova) {
+        updateStatus("Running in browser environment.");
+        initAppListeners();
+        // Fallback mock loader for layout testing
+        el.loadFileBtn.addEventListener('click', handleBrowserFileSelect);
     }
-    return './assets/data/myschedule.ics';
+}, 1000);
+
+function onDeviceReady() {
+    updateStatus("Cordova initialized. Loading storage...");
+    initAppListeners();
+    
+    // Automatically try to load the file on startup
+    loadIcsFile();
 }
 
-async function loadConfiguration() {
+/**
+ * Binds DOM event listeners
+ */
+function initAppListeners() {
+    // Top Bar Controls
+    el.loadFileBtn.addEventListener('click', () => {
+        if (window.cordova) {
+            pickAndCopyLocalFile();
+        } else {
+            showModal("Feature Notice", "File system picker requires running on a mobile device or simulator.");
+        }
+    });
+
+    el.refreshBtn.addEventListener('click', () => {
+        loadIcsFile();
+    });
+
+    el.exitBtn.addEventListener('click', () => {
+        if (navigator.app && navigator.app.exitApp) {
+            navigator.app.exitApp();
+        } else {
+            showModal("Application Exit", "Exit execution called (Not supported in standard browsers).");
+        }
+    });
+
+    // Date Picker Controls
+    el.selectDateBtn.addEventListener('click', () => {
+        el.dateInput.showPicker ? el.dateInput.showPicker() : el.dateInput.click();
+    });
+
+    el.dateInput.addEventListener('change', (e) => {
+        if (e.target.value) {
+            // Fix timezone shifting issue with input[type="date"]
+            const [year, month, day] = e.target.value.split('-').map(Number);
+            appState.selectedDate = new Date(year, month - 1, day);
+            
+            renderScheduleForSelectedDate();
+        }
+    });
+}
+
+// --- Data Operations & Processing ---
+
+/**
+ * Loads and processes the targeted schedule.ics file using Cordova File Plugin APIs
+ */
+function loadIcsFile() {
+    if (!window.cordova) {
+        updateStatus("Ready (No file loaded)");
+        return;
+    }
+
+    updateStatus("Locating schedule file...");
+    
+    // Target Application Data Directory (Private but persistent)
+    window.resolveLocalFileSystemURL(cordova.file.dataDirectory, (dirEntry) => {
+        dirEntry.getFile(FILE_NAME, { create: false }, (fileEntry) => {
+            fileEntry.file((file) => {
+                const reader = new FileReader();
+                reader.onloadend = function() {
+                    parseIcalData(this.result);
+                };
+                reader.readAsText(file);
+            }, (err) => handleFileError("Error reading target file source", err));
+        }, (err) => {
+            updateStatus(`No active '${FILE_NAME}' found. Use the folder icon to import one.`);
+        });
+    }, (err) => handleFileError("Error accessing local directory storage", err));
+}
+
+/**
+ * Uses ical.js to map raw .ics format data into standard UI structures
+ */
+function parseIcalData(rawText) {
     try {
-        CONFIG_ICS_URL = getNativeIcsPath();
-        if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
-            CONFIG_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        updateStatus("Parsing calendar contents...");
+        const jcalData = ICAL.parse(rawText);
+        const comp = new ICAL.Component(jcalData);
+        const vevents = comp.getAllSubcomponents('vevent');
+
+        appState.allEvents = vevents.map(vevent => {
+            const event = new ICAL.Event(vevent);
+            return {
+                summary: event.summary || "Unnamed Shift / Event",
+                location: event.location || "No location specified",
+                // Get JavaScript native dates
+                startDate: event.startDate.toJSDate(),
+                endDate: event.endDate.toJSDate()
+            };
+        });
+
+        updateStatus(`Successfully imported ${appState.allEvents.length} events.`);
+        
+        // Refresh view UI if a date was already selected
+        if (appState.selectedDate) {
+            renderScheduleForSelectedDate();
+        } else {
+            // Default select current day if within bounds
+            appState.selectedDate = new Date();
+            renderScheduleForSelectedDate();
         }
+
     } catch (e) {
-        console.log('Error initializing configuration environment: ' + e.message);
+        console.error(e);
+        showModal("Parsing Failure", "The chosen file isn't a valid iCalendar format standard.");
+        updateStatus("Parsing error encountered.");
     }
 }
 
-// ---- ICS Calendar wrapper ----
-class Calendar {
-    constructor(icsText) {
-        this.events = [];
-        this._parse(icsText);
+// --- Dynamic Rendering Logic ---
+
+/**
+ * Filters the compiled state data arrays and draws UI elements dynamically
+ */
+function renderScheduleForSelectedDate() {
+    const d = appState.selectedDate;
+    if (!d) return;
+
+    // Standard long localized format
+    const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+    el.dateHeader.textContent = d.toLocaleDateString(undefined, options);
+
+    // Clear old container data nodes safely
+    el.detailsColumn.innerHTML = '';
+
+    // Filter elements matching calendar target date metrics
+    const targetedShifts = appState.allEvents.filter(event => {
+        return event.startDate.getFullYear() === d.getFullYear() &&
+               event.startDate.getMonth() === d.getMonth() &&
+               event.startDate.getDate() === d.getDate();
+    });
+
+    // Handle Empty Arrays
+    if (targetedShifts.length === 0) {
+        const fallbackNode = document.createElement('div');
+        fallbackNode.className = 'no-shifts';
+        fallbackNode.textContent = "No shifts scheduled for this day.";
+        el.detailsColumn.appendChild(fallbackNode);
+        return;
     }
 
-    _parse(icsText) {
-        const jcalData = ICAL.parse(icsText);
-        const component = new ICAL.Component(jcalData);
-        const vevents = component.getAllSubcomponents('vevent');
+    // Sort sequential array timelines chronologically
+    targetedShifts.sort((a, b) => a.startDate - b.startDate);
 
-        for (const vevent of vevents) {
-            const icalEvent = new ICAL.Event(vevent);
-            this.events.push({
-                begin: { datetime: icalEvent.startDate.toJSDate() },
-                end: { datetime: icalEvent.endDate.toJSDate() },
-                name: icalEvent.summary || '',
-                location: icalEvent.location || ''
-            });
-        }
+    // Iterate structural card attachments
+    targetedShifts.forEach(shift => {
+        const timeStr = `${formatTime(shift.startDate)} - ${formatTime(shift.endDate)}`;
+        
+        const cardNode = document.createElement('div');
+        cardNode.className = 'shift-card';
+        
+        cardNode.innerHTML = `
+            <div class="shift-name">${escapeHTML(shift.summary)}</div>
+            <div class="shift-time">${timeStr}</div>
+            <div class="shift-location">${escapeHTML(shift.location)}</div>
+        `;
+        
+        el.detailsColumn.appendChild(cardNode);
+    });
+}
+
+// --- Device File Picker Utilities ---
+
+/**
+ * Handles picking an external .ics file and copying it to the local working path
+ */
+function pickAndCopyLocalFile() {
+    // Checks standard ecosystem plugins for actions safely
+    if (window.plugins && window.plugins.FilePicker) {
+        window.plugins.FilePicker.pickFile((uri) => {
+            copyPickedFileToAppSpace(uri);
+        }, (err) => {
+            console.log("User aborted picking file action", err);
+        }, "text/calendar");
+    } else {
+        showModal("System Limitation", "External file picker plugin is missing or unlinked.");
     }
 }
 
-// ---- 2. Application UI and Logic ----
-class CalendarApp {
-    constructor(urlAddress, timezone) {
-        this.icsUrl = urlAddress;
-        this.eventsByDate = {};
-        this.localTz = timezone || 'America/Edmonton';
-        this.loadingLock = false;
+function copyPickedFileToAppSpace(sourceUri) {
+    window.resolveLocalFileSystemURL(sourceUri, (fileEntry) => {
+        window.resolveLocalFileSystemURL(cordova.file.dataDirectory, (dirEntry) => {
+            fileEntry.copyTo(dirEntry, FILE_NAME, (copiedEntry) => {
+                showModal("Import Complete", "File imported into application workspace successfully.");
+                loadIcsFile();
+            }, (err) => handleFileError("Error copying file to app storage", err));
+        }, (err) => handleFileError("Destination workspace missing", err));
+    }, (err) => handleFileError("Target source file resolution failure", err));
+}
 
-        this.page = {
-            title: 'Schedule Viewer',
-            themeMode: 'LIGHT'
+// --- Fallbacks & Helper Functions ---
+
+function handleBrowserFileSelect() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.ics';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = function() {
+            parseIcalData(this.result);
         };
-
-        document.title = this.page.title;
-        this.createWidgets();
-    }
-
-    createWidgets() {
-        this.datePicker = document.getElementById('hidden-date-input');
-        this.datePicker.addEventListener('change', (e) => this.onDateSelected(e));
-
-        this.selectDateBtn = document.getElementById('select-date-btn');
-        this.selectDateBtn.addEventListener('click', () => this.openDatePicker());
-
-        this.statusLabel = document.getElementById('status-label');
-
-        this.refreshBtn = document.getElementById('refresh-btn');
-        this.refreshBtn.addEventListener('click', (e) => this.triggerRefresh(e));
-
-        this.exitBtn = document.getElementById('exit-btn');
-        this.exitBtn.addEventListener('click', (e) => this.exitApplication(e));
-
-        this.loadFileBtn = document.getElementById('load-file-btn');
-        this.loadFileBtn.addEventListener('click', () => this.chooseLocalFile());
-
-        this.dateHeader = document.getElementById('date-header');
-        this.detailsColumn = document.getElementById('details-column');
-    }
-
-    // Flexible Picker: Works across Internal Storage, SD Cards, Downloads, and Cloud Drives
-    chooseLocalFile() {
-        if (this.loadingLock) return;
-
-        if (!window.cordova || !window.saf) {
-            this.showErrorDialog("Environment Error", "Flexible Document Selector requires execution inside a native mobile bundle wrapper.");
-            return;
-        }
-
-        this.statusLabel.textContent = 'Opening Storage Picker...';
-
-        window.saf.openDocumentPicker({
-            "mimeType": "text/calendar", 
-            "multiple": false
-        }, async (uri) => {
-            try {
-                this.statusLabel.textContent = 'Authenticating identity...';
-                
-                const isAuthenticated = await this._authenticateUserMobile();
-                if (!isAuthenticated) {
-                    throw new Error('Authentication failed or dismissed by user.');
-                }
-
-                this.statusLabel.textContent = 'Reading storage stream...';
-
-                // Reads data directly via safe content stream stream identifiers
-                window.saf.readDocument(uri, (fileContentText) => {
-                    this.statusLabel.textContent = 'Parsing data...';
-                    this.loadCalendarFromText(fileContentText);
-                }, (readError) => {
-                    this.showErrorDialog("Storage Access Error", "System access rules denied reading from this file location location.");
-                    this.statusLabel.textContent = 'Ready';
-                });
-
-            } catch (authError) {
-                this.statusLabel.textContent = 'Access Denied.';
-                this.showErrorDialog('Security Check Failed', String(authError).replace('Error: ', ''));
-            }
-
-        }, (pickerError) => {
-            this.statusLabel.textContent = 'Ready';
-            console.log("User closed picking dialog workflow: " + pickerError);
-        });
-    }
-
-    // Unified Calendar Text Parser
-    loadCalendarFromText(icsText) {
-        try {
-            icsText = icsText.trim();
-
-            if (!icsText.startsWith('BEGIN:VCALENDAR')) {
-                throw new Error('The selected document data layout is not a valid iCalendar stream file structure.');
-            }
-
-            const calendar = new Calendar(icsText);
-            const temporaryEvents = {};
-
-            for (const event of calendar.events) {
-                const localBegin = event.begin.datetime; 
-                const dateStr = this._formatDateInTimezone(localBegin, this.localTz);
-                if (!temporaryEvents[dateStr]) {
-                    temporaryEvents[dateStr] = [];
-                }
-                temporaryEvents[dateStr].push(event);
-            }
-
-            this.eventsByDate = temporaryEvents;
-            this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts.';
-            this.displayShiftsForDate(new Date(), false);
-
-        } catch (err) {
-            this.showErrorDialog('Parsing Error', err.message);
-            this.statusLabel.textContent = 'Processing error.';
-        }
-    }
-
-    openDatePicker() {
-        if (typeof this.datePicker.showPicker === 'function') {
-            this.datePicker.showPicker();
-        } else {
-            this.datePicker.focus();
-            this.datePicker.click();
-        }
-    }
-
-    exitApplication(e) {
-        if (typeof window.close === 'function') {
-            window.close();
-        }
-    }
-
-    initializeLoad() {
-        if (this.icsUrl) {
-            this.statusLabel.textContent = 'Connecting...';
-            this.fetchCalendarData();
-        } else {
-            this.statusLabel.textContent = 'Error: No calendar path configured.';
-        }
-    }
-
-    triggerRefresh(e) {
-        if (!this.loadingLock && this.icsUrl) {
-            this.statusLabel.textContent = 'Refreshing...';
-            this.detailsColumn.innerHTML = '';
-            this.fetchCalendarData();
-        }
-    }
-
-    // Handles default application sandbox initialization logic 
-    async fetchCalendarData() {
-        if (this.loadingLock) return;
-
-        try {
-            this.loadingLock = true;
-            this.statusLabel.textContent = 'Checking sandbox access...';
-
-            const isAuthenticated = await this._authenticateUserMobile();
-            if (!isAuthenticated) throw new Error('Authentication failed.');
-
-            let icsText = '';
-            if (window.cordova) {
-                icsText = await this._readLocalFileCordova(this.icsUrl);
-            } else {
-                const response = await fetch(this.icsUrl);
-                icsText = await response.text();
-            }
-
-            this.loadingLock = false;
-            this.loadCalendarFromText(icsText);
-
-        } catch (err) {
-            this.loadingLock = false;
-            this.statusLabel.textContent = 'Ready';
-            console.log("No initial sandbox schedule discovered. Awaiting user picker choices: " + err.message);
-        }
-    }
-
-    onDateSelected(e) {
-        if (this.loadingLock) return;
-
-        let selectedValue = e.target ? e.target.value : this.datePicker.value;
-        if (!selectedValue) return;
-
-        if (typeof selectedValue === 'string') {
-            try {
-                const parts = selectedValue.split('-');
-                if (parts.length === 3) {
-                    // Timezone Shift Safe Parsing Implementation Logic
-                    selectedValue = new Date(
-                        parseInt(parts[0]),
-                        parseInt(parts[1]) - 1,
-                        parseInt(parts[2])
-                    );
-                } else {
-                    const isoStr = selectedValue.replace('Z', '+00:00');
-                    selectedValue = new Date(isoStr);
-                }
-            } catch (parseErr) {
-                return;
-            }
-        }
-
-        this.displayShiftsForDate(selectedValue, true);
-    }
-
-    displayShiftsForDate(targetDate, explicitUpdate) {
-        const dateKey = this._formatDateInTimezone(targetDate, this.localTz);
-        this.dateHeader.textContent = this._formatDateHeader(targetDate, this.localTz);
-        this.detailsColumn.innerHTML = '';
-
-        if (dateKey in this.eventsByDate) {
-            const dayEvents = [...this.eventsByDate[dateKey]].sort(
-                (a, b) => a.begin.datetime - b.begin.datetime
-            );
-
-            for (const ev of dayEvents) {
-                const localBegin = ev.begin.datetime;
-                const localEnd = ev.end.datetime;
-
-                const startTime = this._formatTimeInTimezone(localBegin, this.localTz);
-                const endTime = this._formatTimeInTimezone(localEnd, this.localTz);
-                const location = ev.location ? ev.location : 'Not Specified';
-
-                const shiftCard = document.createElement('div');
-                shiftCard.className = 'shift-card';
-                shiftCard.innerHTML =
-                    '<div class="shift-name">&#x1F4BC; ' + this._escapeHtml(ev.name) + '</div>' +
-                    '<div class="shift-time">&#x23F0; ' + this._escapeHtml(startTime) + ' - ' + this._escapeHtml(endTime) + '</div>' +
-                    '<div class="shift-location">&#x1F4CD; Location: ' + this._escapeHtml(location) + '</div>';
-
-                this.detailsColumn.appendChild(shiftCard);
-            }
-        } else {
-            const noShiftsDiv = document.createElement('div');
-            noShiftsDiv.className = 'no-shifts';
-            noShiftsDiv.textContent = 'No shifts scheduled for this day.';
-            this.detailsColumn.appendChild(noShiftsDiv);
-        }
-    }
-
-    showErrorDialog(title, message) {
-        const overlay = document.createElement('div');
-        overlay.className = 'modal-overlay';
-
-        const dialog = document.createElement('div');
-        dialog.className = 'modal-dialog';
-        dialog.innerHTML =
-            '<div class="modal-title">' + this._escapeHtml(title) + '</div>' +
-            '<div class="modal-content">' + this._escapeHtml(message) + '</div>' +
-            '<div class="modal-actions">' +
-            '<button class="modal-ok-btn" id="modal-ok-btn">OK</button>' +
-            '</div>';
-
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-
-        const closeDialog = () => {
-            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        };
-
-        dialog.querySelector('#modal-ok-btn').addEventListener('click', closeDialog);
-        overlay.addEventListener('click', function(e) {
-            if (e.target === overlay) closeDialog();
-        });
-    }
-
-    _formatDateInTimezone(date, timezone) {
-        const formatter = new Intl.DateTimeFormat('en-CA', {
-            timeZone: timezone,
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-        });
-        return formatter.format(date);
-    }
-
-    _formatDateHeader(date, timezone) {
-        const formatter = new Intl.DateTimeFormat('en-US', {
-            timeZone: timezone,
-            weekday: 'long',
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-        });
-        return formatter.format(date);
-    }
-
-    _formatTimeInTimezone(date, timezone) {
-        const formatter = new Intl.DateTimeFormat('en-US', {
-            timeZone: timezone,
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
-        });
-        return formatter.format(date);
-    }
-
-    _escapeHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
-    }
-
-    _authenticateUserMobile() {
-        return new Promise((resolve) => {
-            if (window.Capacitor && window.Capacitor.Plugins.BiometricAuth) {
-                window.Capacitor.Plugins.BiometricAuth.verifyBiometric({
-                    reason: "Verify identity to access schedule data",
-                    title: "Verification Required"
-                }).then(() => resolve(true)).catch(() => resolve(false));
-            } 
-            else if (window.Fingerprint) {
-                window.Fingerprint.show({
-                    title: 'Verification Required',
-                    description: 'Verify identity to access schedule data',
-                    disableBackup: false
-                }, () => resolve(true), () => resolve(false));
-            } 
-            else {
-                console.warn("Biometrics context bypassed in desktop platform layout context.");
-                resolve(true); 
-            }
-        });
-    }
-
-    _readLocalFileCordova(filePath) {
-        return new Promise((resolve, reject) => {
-            let standardizedPath = filePath;
-            if (!standardizedPath.startsWith('file://')) {
-                standardizedPath = 'file://' + standardizedPath;
-            }
-
-            window.resolveLocalFileSystemURL(standardizedPath, (fileEntry) => {
-                fileEntry.file((file) => {
-                    const reader = new FileReader();
-                    reader.onloadend = function() {
-                        resolve(this.result);
-                    };
-                    reader.onerror = reject;
-                    reader.readAsText(file);
-                }, reject);
-            }, reject);
-        });
-    }
-
-    async _readLocalFileCapacitor(fileName) {
-        const { Filesystem, Directory } = window.Capacitor.Plugins;
-        const contents = await Filesystem.readFile({
-            path: fileName,
-            directory: Directory.Data,
-            encoding: 'utf8'
-        });
-        return contents.data;
-    }
+        reader.readAsText(file);
+    };
+    input.click();
 }
 
-// ---- 3. Execution Lifecycle Initialization Loop ----
-async function main() {
-    await loadConfiguration();
-    const app = new CalendarApp(CONFIG_ICS_URL, CONFIG_TIMEZONE);
-    app.initializeLoad();
+function formatTime(date) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-if (window.cordova) {
-    document.addEventListener('deviceready', main, false);
-} else {
-    document.addEventListener('DOMContentLoaded', main, false);
+function updateStatus(msg) {
+    el.statusLabel.textContent = msg;
+}
+
+function handleFileError(context, error) {
+    console.error(`${context}: `, error);
+    updateStatus(`Error executing filesystem actions.`);
+}
+
+function escapeHTML(str) {
+    return str.replace(/[&<>'"]/g, 
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+    );
+}
+
+/**
+ * Custom application alert overlay builder matching application layout
+ */
+function showModal(title, text) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    
+    overlay.innerHTML = `
+        <div class="modal-dialog">
+            <div class="modal-title">${escapeHTML(title)}</div>
+            <div class="modal-content">${escapeHTML(text)}</div>
+            <div class="modal-actions">
+                <button class="modal-ok-btn">OK</button>
+            </div>
+        </div>
+    `;
+    
+    overlay.querySelector('.modal-ok-btn').addEventListener('click', () => {
+        overlay.remove();
+    });
+    
+    document.body.appendChild(overlay);
 }
