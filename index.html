@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Schedule Viewer</title>
+    
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#448AFF">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/ical.js@1.5.0/build/ical.min.js"></script>
     <style>
@@ -182,7 +188,7 @@
             color: #757575;
         }
 
-        /* Alert Dialog / Modal */
+        /* Modal Dialog Style */
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -275,7 +281,7 @@
     </div>
 
     <script>
-        // ---- ICS Calendar wrapper ----
+        // ---- 1. Calendar Data Wrapper ----
         class Calendar {
             constructor(icsText) {
                 this.events = [];
@@ -299,35 +305,22 @@
             }
         }
 
-        // ---- Application UI and Logic ----
+        // ---- 2. Application Logic Architecture ----
         class CalendarApp {
             constructor(timezone) {
                 this.eventsByDate = {};
                 this.localTz = timezone || 'America/Edmonton';
-                this.loadingLock = false;
                 this.currentSelectedDate = new Date();
-
-                this.page = {
-                    title: 'Schedule Viewer',
-                    themeMode: 'LIGHT',
-                    padding: { left: 10, top: 110, right: 10, bottom: 10 },
-                    scroll: 'AUTO',
-                    update: () => {}
-                };
-
-                document.title = this.page.title;
                 this.createWidgets();
             }
 
             createWidgets() {
-                // File Upload Setup
                 this.fileInput = document.getElementById('hidden-file-input');
                 this.fileInput.addEventListener('change', (e) => this.onFileUploaded(e));
 
                 this.uploadBtn = document.getElementById('upload-ics-btn');
                 this.uploadBtn.addEventListener('click', () => this.fileInput.click());
 
-                // Date Picker Setup
                 this.datePicker = document.getElementById('hidden-date-input');
                 this.datePicker.addEventListener('change', (e) => this.onDateSelected(e));
 
@@ -335,7 +328,6 @@
                 this.selectDateBtn.addEventListener('click', () => this.openDatePicker());
 
                 this.statusLabel = document.getElementById('status-label');
-
                 this.refreshBtn = document.getElementById('refresh-btn');
                 this.refreshBtn.addEventListener('click', (e) => this.triggerRefresh(e));
 
@@ -345,7 +337,7 @@
                 this.dateHeader = document.getElementById('date-header');
                 this.detailsColumn = document.getElementById('details-column');
 
-                // Apply initial disabled state rules to the Date button
+                // Apply initial disabled security boundary rules
                 this.selectDateBtn.disabled = true;
                 this.selectDateBtn.style.opacity = '0.5';
                 this.selectDateBtn.style.cursor = 'not-allowed';
@@ -361,37 +353,25 @@
             }
 
             triggerRefresh(e) {
-                // Clear the value out of the native date picker interface element
                 this.datePicker.value = '';
-
-                // 1. Snapshot today's date
                 const today = new Date();
-                // 2. Normalize to midnight to eliminate local timezone offset mismatches
                 today.setHours(0, 0, 0, 0);
-                
                 this.currentSelectedDate = today;
                 
-                // 3. Inform status contextual to internal memory status
                 if (Object.keys(this.eventsByDate).length > 0) {
                     this.statusLabel.textContent = "Refreshed view to today's date.";
                 } else {
                     this.statusLabel.textContent = 'Please upload an iCalendar (.ics) file to begin.';
                 }
-                
-                // 4. Force immediate schedule viewport refresh
                 this.displayShiftsForDate(this.currentSelectedDate, true);
             }
 
             exitApplication(e) {
-                // Clear the value out of the native date picker interface element
                 this.datePicker.value = '';
-
-                // Perform total data reset
                 this.fileInput.value = ''; 
                 this.eventsByDate = {}; 
                 this.currentSelectedDate = new Date(); 
                 
-                // Reinstate interactive restrictions on the date selector
                 this.selectDateBtn.disabled = true;
                 this.selectDateBtn.style.opacity = '0.5';
                 this.selectDateBtn.style.cursor = 'not-allowed';
@@ -409,11 +389,9 @@
                 this.detailsColumn.innerHTML = '';
 
                 const reader = new FileReader();
-                
                 reader.onload = (event) => {
                     try {
                         let icsText = event.target.result.trim();
-
                         if (!icsText.startsWith('BEGIN:VCALENDAR')) {
                             throw new Error('The target file is not a valid iCalendar feed.');
                         }
@@ -433,24 +411,22 @@
                         this.eventsByDate = temporaryEvents;
                         this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts from "' + file.name + '"';
 
-                        // Business Rule: Enable choose date controls post-parsing
+                        // Business Rule: Enable conditional date filtering
                         this.selectDateBtn.disabled = false;
                         this.selectDateBtn.style.opacity = '1';
                         this.selectDateBtn.style.cursor = 'pointer';
 
+                        // Instantly default view to today's schedule bounds
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        this.currentSelectedDate = today;
+                        
                         this.displayShiftsForDate(this.currentSelectedDate, false);
-
                     } catch (err) {
                         this.statusLabel.textContent = 'Failed to parse file.';
                         this.showErrorDialog('File Loading Error', String(err));
                     }
                 };
-
-                reader.onerror = () => {
-                    this.statusLabel.textContent = 'Failed to read file.';
-                    this.showErrorDialog('File System Error', 'Could not read local file records.');
-                };
-
                 reader.readAsText(file);
             }
 
@@ -462,20 +438,12 @@
                     try {
                         const parts = selectedValue.split('-');
                         if (parts.length === 3) {
-                            selectedValue = new Date(
-                                parseInt(parts[0]),
-                                parseInt(parts[1]) - 1,
-                                parseInt(parts[2])
-                            );
+                            selectedValue = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
                         } else {
-                            const isoStr = selectedValue.replace('Z', '+00:00');
-                            selectedValue = new Date(isoStr);
+                            selectedValue = new Date(selectedValue.replace('Z', '+00:00'));
                         }
-                    } catch (parseErr) {
-                        return;
-                    }
+                    } catch (parseErr) { return; }
                 }
-
                 this.currentSelectedDate = selectedValue;
                 this.displayShiftsForDate(selectedValue, true);
             }
@@ -494,25 +462,16 @@
                 }
 
                 if (dateKey in this.eventsByDate) {
-                    const dayEvents = [...this.eventsByDate[dateKey]].sort(
-                        (a, b) => a.begin.datetime - b.begin.datetime
-                    );
-
+                    const dayEvents = [...this.eventsByDate[dateKey]].sort((a, b) => a.begin.datetime - b.begin.datetime);
                     for (const ev of dayEvents) {
-                        const localBegin = ev.begin.datetime;
-                        const localEnd = ev.end.datetime;
-
-                        const startTime = this._formatTimeInTimezone(localBegin, this.localTz);
-                        const endTime = this._formatTimeInTimezone(localEnd, this.localTz);
-                        const location = ev.location ? ev.location : 'Not Specified';
-
+                        const startTime = this._formatTimeInTimezone(ev.begin.datetime, this.localTz);
+                        const endTime = this._formatTimeInTimezone(ev.end.datetime, this.localTz);
                         const shiftCard = document.createElement('div');
                         shiftCard.className = 'shift-card';
                         shiftCard.innerHTML =
                             '<div class="shift-name">&#x1F4BC; ' + this._escapeHtml(ev.name) + '</div>' +
                             '<div class="shift-time">&#x23F0; ' + this._escapeHtml(startTime) + ' - ' + this._escapeHtml(endTime) + '</div>' +
-                            '<div class="shift-location">&#x1F4CD; Location: ' + this._escapeHtml(location) + '</div>';
-
+                            '<div class="shift-location">&#x1F4CD; Location: ' + this._escapeHtml(ev.location || 'Not Specified') + '</div>';
                         this.detailsColumn.appendChild(shiftCard);
                     }
                 } else {
@@ -526,75 +485,44 @@
             showErrorDialog(title, message) {
                 const overlay = document.createElement('div');
                 overlay.className = 'modal-overlay';
-
                 const dialog = document.createElement('div');
                 dialog.className = 'modal-dialog';
                 dialog.innerHTML =
                     '<div class="modal-title">' + this._escapeHtml(title) + '</div>' +
                     '<div class="modal-content">' + this._escapeHtml(message) + '</div>' +
-                    '<div class="modal-actions">' +
-                    '<button class="modal-ok-btn" id="modal-ok-btn">OK</button>' +
-                    '</div>';
-
+                    '<div class="modal-actions"><button class="modal-ok-btn" id="modal-ok-btn">OK</button></div>';
                 overlay.appendChild(dialog);
                 document.body.appendChild(overlay);
-
-                const closeDialog = () => {
-                    if (overlay.parentNode) {
-                        overlay.parentNode.removeChild(overlay);
-                    }
-                };
-
-                dialog.querySelector('#modal-ok-btn').addEventListener('click', closeDialog);
-                overlay.addEventListener('click', function(e) {
-                    if (e.target === overlay) {
-                        closeDialog();
-                    }
-                });
+                dialog.querySelector('#modal-ok-btn').addEventListener('click', () => overlay.remove());
             }
 
             _formatDateInTimezone(date, timezone) {
-                const formatter = new Intl.DateTimeFormat('en-CA', {
-                    timeZone: timezone,
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit'
-                });
-                return formatter.format(date);
+                return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
             }
-
             _formatDateHeader(date, timezone) {
-                const formatter = new Intl.DateTimeFormat('en-US', {
-                    timeZone: timezone,
-                    weekday: 'long',
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                });
-                return formatter.format(date);
+                return new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }).format(date);
             }
-
             _formatTimeInTimezone(date, timezone) {
-                const formatter = new Intl.DateTimeFormat('en-US', {
-                    timeZone: timezone,
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true
-                });
-                return formatter.format(date);
+                return new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: true }).format(date);
             }
-
             _escapeHtml(str) {
-                const div = document.createElement('div');
-                div.textContent = str;
-                return div.innerHTML;
+                const div = document.createElement('div'); div.textContent = str; return div.innerHTML;
             }
         }
 
-        // ---- Execution ----
+        // ---- 3. Service Worker Lifecycle Management ----
         document.addEventListener('DOMContentLoaded', function() {
             const app = new CalendarApp('America/Edmonton');
             app.displayShiftsForDate(new Date(), false);
+
+            // Conditional Service Worker registration layer
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('./sw.js')
+                        .then(reg => console.log('Service Worker ready! Scope layout is:', reg.scope))
+                        .catch(err => console.error('Service Worker activation barrier encountered:', err));
+                });
+            }
         });
     </script>
 </body>
