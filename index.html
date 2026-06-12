@@ -258,33 +258,41 @@
     </div>
 
     <script>
+        // ---- Helper: get assets directory ----
+        function getAssetsDir() {
+            return './assets';
+        }
+
         // ---- 1. Configuration & Data Loading ----
         let CONFIG_ICS_URL = null;
         let CONFIG_TIMEZONE = 'America/Edmonton'; // Fallback default
 
-        function getNativeIcsPath() {
-            if (window.cordova) {
-                // Persistent application storage sandbox path for Cordova
-                return cordova.file.dataDirectory + 'myschedule.ics';
-            } else if (window.Capacitor) {
-                // Name handle for Capacitor filesystems
-                return 'myschedule.ics'; 
-            }
-            // Standard relative path web fallback
-            return './assets/data/myschedule.ics';
-        }
-
         async function loadConfiguration() {
             try {
-                // Automatically assign targeted calendar structure path
-                CONFIG_ICS_URL = getNativeIcsPath();
+                const assetsDir = getAssetsDir();
+                const jsonFilePath = assetsDir + '/data/data.json';
 
-                // Dynamic timezone extraction based on native system regional settings
-                if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
-                    CONFIG_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const response = await fetch(jsonFilePath);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch data.json: ' + response.status);
+                }
+                const data = await response.json();
+
+                // Extract timezone from your JSON config
+                if (data.timezone) {
+                    CONFIG_TIMEZONE = data.timezone;
+                }
+
+                // Extract the ICS URL path specified in your JSON config
+                const feeds = data.ics_feeds || [];
+                if (feeds && Array.isArray(feeds) && feeds.length > 0) {
+                    CONFIG_ICS_URL = feeds[0].ics_url || null;
+                } else {
+                    CONFIG_ICS_URL = null;
                 }
             } catch (e) {
-                console.log('Error initializing environment security paths: ' + e.message);
+                CONFIG_ICS_URL = null;
+                console.log('Error reading configuration setup: ' + e.message);
             }
         }
 
@@ -391,32 +399,16 @@
 
                 try {
                     this.loadingLock = true;
-                    this.statusLabel.textContent = 'Authenticating...';
 
-                    // Step 1: Force User Biometric Check via OS Hooks
-                    const isAuthenticated = await this._authenticateUserMobile();
-                    if (!isAuthenticated) {
-                        throw new Error('Authentication failed or dismissed by user.');
+                    // Fetch the local .ics file
+                    const response = await fetch(this.icsUrl, {
+                        signal: AbortSignal.timeout(15000)
+                    });
+                    if (!response.ok) {
+                        throw new Error('HTTP error! Status: ' + response.status);
                     }
 
-                    this.statusLabel.textContent = 'Reading storage...';
-                    let icsText = '';
-
-                    // Step 2: Handle Native file systems vs browser fallbacks
-                    if (window.cordova) {
-                        icsText = await this._readLocalFileCordova(this.icsUrl);
-                    } else if (window.Capacitor) {
-                        icsText = await this._readLocalFileCapacitor(this.icsUrl);
-                    } else {
-                        // Web fallback for development/testing
-                        const response = await fetch(this.icsUrl);
-                        if (!response.ok) {
-                            throw new Error('HTTP error! Status: ' + response.status);
-                        }
-                        icsText = await response.text();
-                    }
-
-                    icsText = icsText.trim();
+                    let icsText = (await response.text()).trim();
 
                     if (!icsText.startsWith('BEGIN:VCALENDAR')) {
                         throw new Error('The target file is not a valid iCalendar feed.');
@@ -442,8 +434,8 @@
 
                 } catch (err) {
                     this.loadingLock = false;
-                    this.statusLabel.textContent = 'Access Denied.';
-                    this.showErrorDialog('Security & Access Error', String(err).replace('Error: ', ''));
+                    this.statusLabel.textContent = 'Failed to load file.';
+                    this.showErrorDialog('File Loading Error', String(err));
                 }
             }
 
@@ -578,63 +570,6 @@
                 const div = document.createElement('div');
                 div.textContent = str;
                 return div.innerHTML;
-            }
-
-            // ---- Native Platform Core Helpers ----
-
-            // Dispatches Biometric Validation Requests across Android and iOS 
-            _authenticateUserMobile() {
-                return new Promise((resolve) => {
-                    // Capacitor Implementation
-                    if (window.Capacitor && window.Capacitor.Plugins.BiometricAuth) {
-                        window.Capacitor.Plugins.BiometricAuth.verifyBiometric({
-                            reason: "Verify your identity to access your schedule files",
-                            title: "Identity Verification Required"
-                        }).then(() => resolve(true)).catch(() => resolve(false));
-                    } 
-                    // Cordova Implementation
-                    else if (window.Fingerprint) {
-                        window.Fingerprint.show({
-                            title: 'Identity Verification Required',
-                            description: 'Verify your identity to access your schedule files',
-                            disableBackup: false
-                        }, 
-                        () => resolve(true), 
-                        () => resolve(false));
-                    } 
-                    // Fallback for general web testing environment 
-                    else {
-                        console.warn("Biometrics context not found in desktop web environment.");
-                        resolve(true); 
-                    }
-                });
-            }
-
-            // Reads files safely out of Cordova filesystem mappings
-            _readLocalFileCordova(filePath) {
-                return new Promise((resolve, reject) => {
-                    window.resolveLocalFileSystemURL(filePath, (fileEntry) => {
-                        fileEntry.file((file) => {
-                            const reader = new FileReader();
-                            reader.onloadend = function() {
-                                resolve(this.result);
-                            };
-                            reader.onerror = reject;
-                            reader.readAsText(file);
-                        }, reject);
-                    }, reject);
-                });
-            }
-
-            // Reads files safely via Capacitor Filesystem API
-            async _readLocalFileCapacitor(fileName) {
-                const { Filesystem, Directory } = window.Capacitor.Plugins;
-                const contents = await Filesystem.readFile({
-                    path: fileName,
-                    directory: Directory.Data, // Secure Application Sandbox
-                    encoding: 'utf8'
-                });
-                return contents.data;
             }
         }
 
