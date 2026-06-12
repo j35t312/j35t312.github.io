@@ -4,12 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Schedule Viewer</title>
-    
-    <link rel="manifest" href="./manifest.json">
-    <meta name="theme-color" content="#448AFF">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/ical.js@1.5.0/build/ical.min.js"></script>
     <style>
@@ -90,13 +84,7 @@
             color: var(--red-accent);
         }
 
-        .action-container {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 8px;
-        }
-
-        .action-btn {
+        .select-date-btn {
             display: inline-flex;
             align-items: center;
             gap: 8px;
@@ -107,22 +95,21 @@
             cursor: pointer;
             font-size: 14px;
             font-family: inherit;
-            transition: all 0.2s;
-            flex: 1;
-            justify-content: center;
+            transition: background-color 0.2s, box-shadow 0.2s;
+            margin-bottom: 8px;
         }
 
-        .action-btn:hover:not(:disabled) {
+        .select-date-btn:hover {
             background-color: #f5f5f5;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
         }
 
-        .action-btn .material-icons {
+        .select-date-btn .material-icons {
             font-size: 18px;
             color: #616161;
         }
 
-        #hidden-file-input, #hidden-date-input {
+        #hidden-date-input {
             position: absolute;
             opacity: 0;
             pointer-events: none;
@@ -188,7 +175,7 @@
             color: #757575;
         }
 
-        /* Modal Dialog Style */
+        /* Alert Dialog / Modal */
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -251,37 +238,57 @@
         <div class="header-row" id="header-row">
             <span class="header-title">Schedule Navigation</span>
             <div class="header-actions" id="header-actions">
-                <button class="icon-btn refresh-btn" id="refresh-btn" title="Reset to Today">
+                <button class="icon-btn refresh-btn" id="refresh-btn" title="Refresh Schedule">
                     <span class="material-icons">refresh</span>
                 </button>
-                <button class="icon-btn exit-btn" id="exit-btn" title="Clear Data & Reset">
+                <button class="icon-btn exit-btn" id="exit-btn" title="Exit Application">
                     <span class="material-icons">close</span>
                 </button>
             </div>
         </div>
-
-        <div class="action-container">
-            <button class="action-btn" id="upload-ics-btn">
-                <span class="material-icons">upload_file</span>
-                Upload ICS
-            </button>
-            <button class="action-btn" id="select-date-btn">
-                <span class="material-icons">date_range</span>
-                Choose Dateiununiuniuniuniuni8uuybnyu8b
-            </button>
-        </div>
-
-        <input type="file" id="hidden-file-input" accept=".ics">
+        <button class="select-date-btn" id="select-date-btn">
+            <span class="material-icons">date_range</span>
+            &#x1F4C5; Choose Date
+        </button>
         <input type="date" id="hidden-date-input" min="2025-01-01" max="2030-12-31">
-
-        <div class="status-label" id="status-label">Please upload an iCalendar (.ics) file to begin.</div>
+        <div class="status-label" id="status-label">Ready</div>
         <hr class="divider">
         <div class="date-header" id="date-header">Select a date</div>
         <div class="details-column" id="details-column"></div>
     </div>
 
     <script>
-        // ---- 1. Calendar Data Wrapper ----
+        // ---- 1. Configuration & Data Loading ----
+        let CONFIG_ICS_URL = null;
+        let CONFIG_TIMEZONE = 'America/Edmonton'; // Fallback default
+
+        function getNativeIcsPath() {
+            if (window.cordova) {
+                // Persistent application storage sandbox path for Cordova
+                return cordova.file.dataDirectory + 'myschedule.ics';
+            } else if (window.Capacitor) {
+                // Name handle for Capacitor filesystems
+                return 'myschedule.ics'; 
+            }
+            // Standard relative path web fallback
+            return './assets/data/myschedule.ics';
+        }
+
+        async function loadConfiguration() {
+            try {
+                // Automatically assign targeted calendar structure path
+                CONFIG_ICS_URL = getNativeIcsPath();
+
+                // Dynamic timezone extraction based on native system regional settings
+                if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+                    CONFIG_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                }
+            } catch (e) {
+                console.log('Error initializing environment security paths: ' + e.message);
+            }
+        }
+
+        // ---- ICS Calendar wrapper ----
         class Calendar {
             constructor(icsText) {
                 this.events = [];
@@ -305,22 +312,28 @@
             }
         }
 
-        // ---- 2. Application Logic Architecture ----
+        // ---- 2. Application UI and Logic ----
         class CalendarApp {
-            constructor(timezone) {
+            constructor(urlAddress, timezone) {
+                this.icsUrl = urlAddress;
                 this.eventsByDate = {};
                 this.localTz = timezone || 'America/Edmonton';
-                this.currentSelectedDate = new Date();
+
+                this.loadingLock = false;
+
+                this.page = {
+                    title: 'Schedule Viewer',
+                    themeMode: 'LIGHT',
+                    padding: { left: 10, top: 110, right: 10, bottom: 10 },
+                    scroll: 'AUTO',
+                    update: () => {}
+                };
+
+                document.title = this.page.title;
                 this.createWidgets();
             }
 
             createWidgets() {
-                this.fileInput = document.getElementById('hidden-file-input');
-                this.fileInput.addEventListener('change', (e) => this.onFileUploaded(e));
-
-                this.uploadBtn = document.getElementById('upload-ics-btn');
-                this.uploadBtn.addEventListener('click', () => this.fileInput.click());
-
                 this.datePicker = document.getElementById('hidden-date-input');
                 this.datePicker.addEventListener('change', (e) => this.onDateSelected(e));
 
@@ -328,6 +341,7 @@
                 this.selectDateBtn.addEventListener('click', () => this.openDatePicker());
 
                 this.statusLabel = document.getElementById('status-label');
+
                 this.refreshBtn = document.getElementById('refresh-btn');
                 this.refreshBtn.addEventListener('click', (e) => this.triggerRefresh(e));
 
@@ -336,10 +350,6 @@
 
                 this.dateHeader = document.getElementById('date-header');
                 this.detailsColumn = document.getElementById('details-column');
-
-                this.selectDateBtn.disabled = true;
-                this.selectDateBtn.style.opacity = '0.5';
-                this.selectDateBtn.style.cursor = 'not-allowed';
             }
 
             openDatePicker() {
@@ -351,97 +361,120 @@
                 }
             }
 
-            triggerRefresh(e) {
-                this.datePicker.value = '';
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                this.currentSelectedDate = today;
-                
-                if (Object.keys(this.eventsByDate).length > 0) {
-                    this.statusLabel.textContent = "Refreshed view to today's date.";
-                } else {
-                    this.statusLabel.textContent = 'Please upload an iCalendar (.ics) file to begin.';
-                }
-                this.displayShiftsForDate(this.currentSelectedDate, true);
-            }
-
             exitApplication(e) {
-                this.datePicker.value = '';
-                this.fileInput.value = ''; 
-                this.eventsByDate = {}; 
-                this.currentSelectedDate = new Date(); 
-                
-                this.selectDateBtn.disabled = true;
-                this.selectDateBtn.style.opacity = '0.5';
-                this.selectDateBtn.style.cursor = 'not-allowed';
-
-                this.detailsColumn.innerHTML = '';
-                this.dateHeader.textContent = 'Select a date';
-                this.statusLabel.textContent = 'Data cleared. Please upload an iCalendar (.ics) file.';
+                if (typeof window.close === 'function') {
+                    window.close();
+                }
             }
 
-            onFileUploaded(e) {
-                const file = e.target.files[0];
-                if (!file) return;
+            initializeLoad() {
+                if (this.icsUrl) {
+                    this.statusLabel.textContent = 'Connecting...';
+                    this.fetchCalendarData();
+                } else {
+                    this.statusLabel.textContent = 'Error: No calendar path configured.';
+                }
+            }
 
-                this.statusLabel.textContent = 'Reading file...';
-                this.detailsColumn.innerHTML = '';
+            triggerRefresh(e) {
+                if (!this.loadingLock && this.icsUrl) {
+                    this.statusLabel.textContent = 'Refreshing...';
+                    this.detailsColumn.innerHTML = '';
+                    this.fetchCalendarData();
+                }
+            }
 
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    try {
-                        let icsText = event.target.result.trim();
-                        if (!icsText.startsWith('BEGIN:VCALENDAR')) {
-                            throw new Error('The target file is not a valid iCalendar feed.');
-                        }
+            async fetchCalendarData() {
+                if (this.loadingLock) {
+                    return;
+                }
 
-                        const calendar = new Calendar(icsText);
-                        const temporaryEvents = {};
+                try {
+                    this.loadingLock = true;
+                    this.statusLabel.textContent = 'Authenticating...';
 
-                        for (const event of calendar.events) {
-                            const localBegin = event.begin.datetime; 
-                            const dateStr = this._formatDateInTimezone(localBegin, this.localTz);
-                            if (!temporaryEvents[dateStr]) {
-                                temporaryEvents[dateStr] = [];
-                            }
-                            temporaryEvents[dateStr].push(event);
-                        }
-
-                        this.eventsByDate = temporaryEvents;
-                        this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts from "' + file.name + '"';
-
-                        this.selectDateBtn.disabled = false;
-                        this.selectDateBtn.style.opacity = '1';
-                        this.selectDateBtn.style.cursor = 'pointer';
-
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        this.currentSelectedDate = today;
-                        
-                        this.displayShiftsForDate(this.currentSelectedDate, false);
-                    } catch (err) {
-                        this.statusLabel.textContent = 'Failed to parse file.';
-                        this.showErrorDialog('File Loading Error', String(err));
+                    // Step 1: Force User Biometric Check via OS Hooks
+                    const isAuthenticated = await this._authenticateUserMobile();
+                    if (!isAuthenticated) {
+                        throw new Error('Authentication failed or dismissed by user.');
                     }
-                };
-                reader.readAsText(file);
+
+                    this.statusLabel.textContent = 'Reading storage...';
+                    let icsText = '';
+
+                    // Step 2: Handle Native file systems vs browser fallbacks
+                    if (window.cordova) {
+                        icsText = await this._readLocalFileCordova(this.icsUrl);
+                    } else if (window.Capacitor) {
+                        icsText = await this._readLocalFileCapacitor(this.icsUrl);
+                    } else {
+                        // Web fallback for development/testing
+                        const response = await fetch(this.icsUrl);
+                        if (!response.ok) {
+                            throw new Error('HTTP error! Status: ' + response.status);
+                        }
+                        icsText = await response.text();
+                    }
+
+                    icsText = icsText.trim();
+
+                    if (!icsText.startsWith('BEGIN:VCALENDAR')) {
+                        throw new Error('The target file is not a valid iCalendar feed.');
+                    }
+
+                    const calendar = new Calendar(icsText);
+                    const temporaryEvents = {};
+
+                    for (const event of calendar.events) {
+                        const localBegin = event.begin.datetime; 
+                        const dateStr = this._formatDateInTimezone(localBegin, this.localTz);
+                        if (!temporaryEvents[dateStr]) {
+                            temporaryEvents[dateStr] = [];
+                        }
+                        temporaryEvents[dateStr].push(event);
+                    }
+
+                    this.eventsByDate = temporaryEvents;
+                    this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts.';
+                    this.loadingLock = false;
+
+                    this.displayShiftsForDate(new Date(), false);
+
+                } catch (err) {
+                    this.loadingLock = false;
+                    this.statusLabel.textContent = 'Access Denied.';
+                    this.showErrorDialog('Security & Access Error', String(err).replace('Error: ', ''));
+                }
             }
 
             onDateSelected(e) {
+                if (this.loadingLock) {
+                    return;
+                }
+
                 let selectedValue = e.target ? e.target.value : this.datePicker.value;
-                if (!selectedValue) return;
+                if (!selectedValue) {
+                    return;
+                }
 
                 if (typeof selectedValue === 'string') {
                     try {
                         const parts = selectedValue.split('-');
                         if (parts.length === 3) {
-                            selectedValue = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                            selectedValue = new Date(
+                                parseInt(parts[0]),
+                                parseInt(parts[1]) - 1,
+                                parseInt(parts[2])
+                            );
                         } else {
-                            selectedValue = new Date(selectedValue.replace('Z', '+00:00'));
+                            const isoStr = selectedValue.replace('Z', '+00:00');
+                            selectedValue = new Date(isoStr);
                         }
-                    } catch (parseErr) { return; }
+                    } catch (parseErr) {
+                        return;
+                    }
                 }
-                this.currentSelectedDate = selectedValue;
+
                 this.displayShiftsForDate(selectedValue, true);
             }
 
@@ -450,25 +483,26 @@
                 this.dateHeader.textContent = this._formatDateHeader(targetDate, this.localTz);
                 this.detailsColumn.innerHTML = '';
 
-                if (Object.keys(this.eventsByDate).length === 0) {
-                    const promptUploadDiv = document.createElement('div');
-                    promptUploadDiv.className = 'no-shifts';
-                    promptUploadDiv.textContent = 'No data available. Please upload an .ics file first.';
-                    this.detailsColumn.appendChild(promptUploadDiv);
-                    return;
-                }
-
                 if (dateKey in this.eventsByDate) {
-                    const dayEvents = [...this.eventsByDate[dateKey]].sort((a, b) => a.begin.datetime - b.begin.datetime);
+                    const dayEvents = [...this.eventsByDate[dateKey]].sort(
+                        (a, b) => a.begin.datetime - b.begin.datetime
+                    );
+
                     for (const ev of dayEvents) {
-                        const startTime = this._formatTimeInTimezone(ev.begin.datetime, this.localTz);
-                        const endTime = this._formatTimeInTimezone(ev.end.datetime, this.localTz);
+                        const localBegin = ev.begin.datetime;
+                        const localEnd = ev.end.datetime;
+
+                        const startTime = this._formatTimeInTimezone(localBegin, this.localTz);
+                        const endTime = this._formatTimeInTimezone(localEnd, this.localTz);
+                        const location = ev.location ? ev.location : 'Not Specified';
+
                         const shiftCard = document.createElement('div');
                         shiftCard.className = 'shift-card';
                         shiftCard.innerHTML =
                             '<div class="shift-name">&#x1F4BC; ' + this._escapeHtml(ev.name) + '</div>' +
                             '<div class="shift-time">&#x23F0; ' + this._escapeHtml(startTime) + ' - ' + this._escapeHtml(endTime) + '</div>' +
-                            '<div class="shift-location">&#x1F4CD; Location: ' + this._escapeHtml(ev.location || 'Not Specified') + '</div>';
+                            '<div class="shift-location">&#x1F4CD; Location: ' + this._escapeHtml(location) + '</div>';
+
                         this.detailsColumn.appendChild(shiftCard);
                     }
                 } else {
@@ -482,73 +516,137 @@
             showErrorDialog(title, message) {
                 const overlay = document.createElement('div');
                 overlay.className = 'modal-overlay';
+
                 const dialog = document.createElement('div');
                 dialog.className = 'modal-dialog';
                 dialog.innerHTML =
                     '<div class="modal-title">' + this._escapeHtml(title) + '</div>' +
                     '<div class="modal-content">' + this._escapeHtml(message) + '</div>' +
-                    '<div class="modal-actions"><button class="modal-ok-btn" id="modal-ok-btn">OK</button></div>';
+                    '<div class="modal-actions">' +
+                    '<button class="modal-ok-btn" id="modal-ok-btn">OK</button>' +
+                    '</div>';
+
                 overlay.appendChild(dialog);
                 document.body.appendChild(overlay);
-                dialog.querySelector('#modal-ok-btn').addEventListener('click', () => overlay.remove());
+
+                const closeDialog = () => {
+                    if (overlay.parentNode) {
+                        overlay.parentNode.removeChild(overlay);
+                    }
+                };
+
+                dialog.querySelector('#modal-ok-btn').addEventListener('click', closeDialog);
+                overlay.addEventListener('click', function(e) {
+                    if (e.target === overlay) {
+                        closeDialog();
+                    }
+                });
             }
 
             _formatDateInTimezone(date, timezone) {
-                return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+                const formatter = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: timezone,
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                });
+                return formatter.format(date);
             }
+
             _formatDateHeader(date, timezone) {
-                return new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }).format(date);
+                const formatter = new Intl.DateTimeFormat('en-US', {
+                    timeZone: timezone,
+                    weekday: 'long',
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+                return formatter.format(date);
             }
+
             _formatTimeInTimezone(date, timezone) {
-                return new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: true }).format(date);
+                const formatter = new Intl.DateTimeFormat('en-US', {
+                    timeZone: timezone,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true
+                });
+                return formatter.format(date);
             }
+
             _escapeHtml(str) {
-                const div = document.createElement('div'); div.textContent = str; return div.innerHTML;
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            // ---- Native Platform Core Helpers ----
+
+            // Dispatches Biometric Validation Requests across Android and iOS 
+            _authenticateUserMobile() {
+                return new Promise((resolve) => {
+                    // Capacitor Implementation
+                    if (window.Capacitor && window.Capacitor.Plugins.BiometricAuth) {
+                        window.Capacitor.Plugins.BiometricAuth.verifyBiometric({
+                            reason: "Verify your identity to access your schedule files",
+                            title: "Identity Verification Required"
+                        }).then(() => resolve(true)).catch(() => resolve(false));
+                    } 
+                    // Cordova Implementation
+                    else if (window.Fingerprint) {
+                        window.Fingerprint.show({
+                            title: 'Identity Verification Required',
+                            description: 'Verify your identity to access your schedule files',
+                            disableBackup: false
+                        }, 
+                        () => resolve(true), 
+                        () => resolve(false));
+                    } 
+                    // Fallback for general web testing environment 
+                    else {
+                        console.warn("Biometrics context not found in desktop web environment.");
+                        resolve(true); 
+                    }
+                });
+            }
+
+            // Reads files safely out of Cordova filesystem mappings
+            _readLocalFileCordova(filePath) {
+                return new Promise((resolve, reject) => {
+                    window.resolveLocalFileSystemURL(filePath, (fileEntry) => {
+                        fileEntry.file((file) => {
+                            const reader = new FileReader();
+                            reader.onloadend = function() {
+                                resolve(this.result);
+                            };
+                            reader.onerror = reject;
+                            reader.readAsText(file);
+                        }, reject);
+                    }, reject);
+                });
+            }
+
+            // Reads files safely via Capacitor Filesystem API
+            async _readLocalFileCapacitor(fileName) {
+                const { Filesystem, Directory } = window.Capacitor.Plugins;
+                const contents = await Filesystem.readFile({
+                    path: fileName,
+                    directory: Directory.Data, // Secure Application Sandbox
+                    encoding: 'utf8'
+                });
+                return contents.data;
             }
         }
 
-        // ---- 3. Auto-Updating Service Worker Lifecycle ----
+        // ---- 3. Execution ----
+        async function main() {
+            await loadConfiguration();
+            const app = new CalendarApp(CONFIG_ICS_URL, CONFIG_TIMEZONE);
+            app.initializeLoad();
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
-            const app = new CalendarApp('America/Edmonton');
-            app.displayShiftsForDate(new Date(), false);
-
-            if ('serviceWorker' in navigator) {
-                let refreshing = false;
-
-                // Listen for controllerchange. When a new service worker claims control, reload the app.
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    if (!refreshing) {
-                        refreshing = true;
-                        window.location.reload();
-                    }
-                });
-
-                window.addEventListener('load', () => {
-                    navigator.serviceWorker.register('./sw.js')
-                        .then((reg) => {
-                            console.log('Service Worker registered. Scope:', reg.scope);
-
-                            // Check for updates on an interval or tab focus
-                            setInterval(() => { reg.update(); }, 60000 * 5); // check every 5 minutes
-
-                            // Handle update logic if a service worker is waiting
-                            if (reg.waiting) {
-                                reg.waiting.postMessage('SKIP_WAITING');
-                            }
-
-                            reg.addEventListener('updatefound', () => {
-                                const newWorker = reg.installing;
-                                newWorker.addEventListener('statechange', () => {
-                                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                        // New code version is fully cached. Tell it to take control.
-                                        newWorker.postMessage('SKIP_WAITING');
-                                    }
-                                });
-                            });
-                        })
-                        .catch((err) => console.error('Service worker initialization failure:', err));
-                });
-            }
+            main();
         });
     </script>
 </body>
