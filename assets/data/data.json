@@ -1,9 +1,0 @@
-{
-  "timezone": "America/Edmonton",
-  "ics_feeds": [
-    {
-      "ics_url": "./assets/data/myschedule.ics",
-      "uid_prefix": "ICS-"
-    }
-  ]
-}
