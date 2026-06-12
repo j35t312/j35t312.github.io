@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sched-viewer-v7'; // Increment this version (v1 -> v2) whenever you deploy updates!
+const CACHE_NAME = 'sched-viewer-v8'; // Increment this version (v1 -> v2) whenever you deploy updates!
 const ASSETS = [
   './',
   './index.html',
