@@ -1,0 +1,22 @@
+{
+  "short_name": "Infor WFM Scheduler",
+  "name": "Infor WFM Calendar Schedule Viewer",
+  "icons": [
+    {
+      "src": "./assets/data/schedule48x48.png",
+      "type": "image/png",
+      "sizes": "48x48"
+    },
+    {
+      "src": "./assets/data/schedule512x512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#ffffff",
+  "theme_color": "#448AFF",
+  "display": "standalone",
+  "orientation": "portrait"
+}
