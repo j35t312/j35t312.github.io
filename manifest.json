@@ -3,12 +3,12 @@
   "name": "Infor WFM Calendar Schedule Viewer",
   "icons": [
     {
-      "src": "./assets/data/schedule48x48.png",
+      "src": "./assets/data/calendar48x48.png",
       "type": "image/png",
       "sizes": "48x48"
     },
     {
-      "src": "./assets/data/schedule512x512.png",
+      "src": "./assets/data/calendar350x350.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
