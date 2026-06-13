@@ -1,6 +1,6 @@
 {
-  "short_name": "Infor WFM Scheduler",
-  "name": "Infor WFM Calendar Schedule Viewer",
+  "short_name": "Scheduler Viewer",
+  "name": "iCalendar Scheduler Viewer",
   "icons": [
     {
       "src": "./assets/data/calendar48x48.png",
