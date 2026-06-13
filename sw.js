@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sched-viewer-v11'; // Increment this version (v1 -> v2) whenever you deploy updates!
+const CACHE_NAME = 'sched-viewer-v12'; // Increment this version (v1 -> v2) whenever you deploy updates!
 const ASSETS = [
   './',
   './index.html',
@@ -14,6 +14,8 @@ const ASSETS = [
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
+      // Skip caching when running from file:// (local filesystem, no HTTP server)
+      if (self.location.protocol === 'file:') return Promise.resolve();
       return cache.addAll(ASSETS);
     }).then(() => self.skipWaiting()) // Force activation without waiting for tab closure
   );

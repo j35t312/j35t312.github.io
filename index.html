@@ -684,7 +684,7 @@
             const app = new CalendarApp('America/Edmonton');
             app.displayShiftsForDate(new Date(), false);
 
-            if ('serviceWorker' in navigator) {
+            if ('serviceWorker' in navigator && location.protocol !== 'file:') {
                 let refreshing = false;
 
                 navigator.serviceWorker.addEventListener('controllerchange', () => {
