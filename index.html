@@ -72,6 +72,7 @@
             cursor: pointer;
             transition: background-color 0.2s;
             padding: 0;
+            position: relative;
         }
 
         .icon-btn:hover {
@@ -88,6 +89,21 @@
 
         .icon-btn.exit-btn .material-icons {
             color: var(--red-accent);
+        }
+
+        .icon-btn.update-btn .material-icons {
+            color: #FF6F00;
+        }
+
+        .update-badge {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #FF6F00;
+            pointer-events: none;
         }
 
         .action-container {
@@ -370,6 +386,10 @@
         <div class="header-row" id="header-row">
             <span class="header-title">Schedule Navigation</span>
             <div class="header-actions" id="header-actions">
+                <button class="icon-btn update-btn" id="update-btn" title="Check for App Update" style="display:none">
+                    <span class="material-icons">system_update_alt</span>
+                    <span class="update-badge" id="update-badge"></span>
+                </button>
                 <button class="icon-btn refresh-btn" id="refresh-btn" title="Reset to Today">
                     <span class="material-icons">refresh</span>
                 </button>
@@ -679,42 +699,63 @@
             }
         }
 
-        // ---- 3. Auto-Updating Service Worker Lifecycle ----
+        // ---- 3. Version & Update Logic ----
+        // Bump this string whenever you deploy a new version (must match APP_VERSION in sw.js).
+        const APP_VERSION = '1.0.0';
+        const VERSION_KEY = 'app_installed_version';
+
         document.addEventListener('DOMContentLoaded', function() {
             const app = new CalendarApp('America/Edmonton');
             app.displayShiftsForDate(new Date(), false);
 
+            const updateBtn = document.getElementById('update-btn');
+
+            // Compare stored version against current in-memory version
+            function checkForUpdate() {
+                const stored = localStorage.getItem(VERSION_KEY);
+                if (stored !== APP_VERSION) {
+                    // Show update button — version mismatch means fresh assets are available
+                    updateBtn.style.display = 'inline-flex';
+                } else {
+                    updateBtn.style.display = 'none';
+                }
+            }
+
+            // On click: nuke all SW caches, write the new version, reload
+            updateBtn.addEventListener('click', function() {
+                updateBtn.disabled = true;
+                updateBtn.title = 'Updating…';
+
+                function doReload() {
+                    localStorage.setItem(VERSION_KEY, APP_VERSION);
+                    window.location.reload(true);
+                }
+
+                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                    // Listen for the SW's RELOAD signal, then hard-reload
+                    navigator.serviceWorker.addEventListener('message', function handler(e) {
+                        if (e.data === 'RELOAD') {
+                            navigator.serviceWorker.removeEventListener('message', handler);
+                            doReload();
+                        }
+                    });
+                    navigator.serviceWorker.controller.postMessage('FORCE_UPDATE');
+                } else {
+                    // No SW active (file:// or first load) — just update version and reload
+                    doReload();
+                }
+            });
+
+            // Register SW and run version check
             if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-                let refreshing = false;
-
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    if (!refreshing) {
-                        refreshing = true;
-                        window.location.reload();
-                    }
-                });
-
-                window.addEventListener('load', () => {
-                    navigator.serviceWorker.register('./sw.js')
-                        .then((reg) => {
-                            console.log('Service Worker registered. Scope:', reg.scope);
-                            setInterval(() => { reg.update(); }, 60000 * 5);
-
-                            if (reg.waiting) {
-                                reg.waiting.postMessage('SKIP_WAITING');
-                            }
-
-                            reg.addEventListener('updatefound', () => {
-                                const newWorker = reg.installing;
-                                newWorker.addEventListener('statechange', () => {
-                                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                        newWorker.postMessage('SKIP_WAITING');
-                                    }
-                                });
-                            });
-                        })
-                        .catch((err) => console.error('Service worker initialization failure:', err));
-                });
+                navigator.serviceWorker.register('./sw.js')
+                    .then((reg) => {
+                        console.log('SW registered:', reg.scope);
+                        checkForUpdate();
+                    })
+                    .catch((err) => console.error('SW registration failed:', err));
+            } else {
+                checkForUpdate(); // still run check even without SW (e.g. first install)
             }
         });
     </script>

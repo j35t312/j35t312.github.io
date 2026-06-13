@@ -1,76 +1,51 @@
-const CACHE_NAME = 'sched-viewer-v17'; // Increment this version (v1 -> v2) whenever you deploy updates!
-const ASSETS = [
+// ---- Service Worker — Barebones Cache-First PWA ----
+// Bump APP_VERSION to match index.html whenever you deploy changes.
+const APP_VERSION = '1.0.0';
+const CACHE_NAME = `sched-viewer-${APP_VERSION}`;
+
+const PRECACHE_ASSETS = [
   './',
   './index.html',
   './manifest.json',
-  './assets/data/schedule48x48.png',
-  './assets/data/schedule512x512.png',
   'https://cdn.jsdelivr.net/npm/ical.js@1.5.0/build/ical.min.js',
   'https://fonts.googleapis.com/icon?family=Material+Icons',
   'https://fonts.gstatic.com/s/materialicons/v142/flUhRq6tzZclQEJ-Vdg-IuiaDsNcIhQ8tQ.woff2'
 ];
 
-// Install Event - Pre-cache essential layout shells
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      // Skip caching when running from file:// (local filesystem, no HTTP server)
-      if (self.location.protocol === 'file:') return Promise.resolve();
-      return cache.addAll(ASSETS);
-    }).then(() => self.skipWaiting()) // Force activation without waiting for tab closure
+// Install: pre-cache assets
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_ASSETS))
   );
 });
 
-// Activate Event - Instantly purge old legacy caches across open browser tabs
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            console.log('Clearing old PWA cache:', key);
-            return caches.delete(key);
-          }
-        })
-      );
-    }).then(() => self.clients.claim()) // Instantly control all open tabs
+// Activate: delete any old caches from previous versions
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(
+        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+      ))
+      .then(() => self.clients.claim())
   );
 });
 
-// Fetch Event - Network-First for HTML, Cache-First for static assets
-self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-
-  // Strategy: Network-First for index.html or root page queries
-  if (url.origin === self.location.origin && (url.pathname === '/' || url.pathname.endsWith('index.html'))) {
-    e.respondWith(
-      fetch(e.request)
-        .then((networkResponse) => {
-          // Update the cache with the fresh version
-          if (networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(e.request, responseClone));
-          }
-          return networkResponse;
-        })
-        .catch(() => caches.match(e.request)) // Offline fallback
-    );
-  } else {
-    // Strategy: Cache-First for everything else (Scripts, Styles, Fonts, Images)
-    e.respondWith(
-      caches.match(e.request).then((cachedResponse) => {
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-        return fetch(e.request);
-      })
-    );
-  }
+// Fetch: cache-first, fall back to network
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
+  );
 });
 
-// Listener to handle forced upgrade updates dispatched from index.html
+// Message handler: FORCE_UPDATE nukes all caches so the next reload fetches fresh
 self.addEventListener('message', (event) => {
-  if (event.data === 'SKIP_WAITING') {
-    self.skipWaiting();
+  if (event.data === 'FORCE_UPDATE') {
+    event.waitUntil(
+      caches.keys()
+        .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+        .then(() => self.clients.matchAll())
+        .then((clients) => clients.forEach((c) => c.postMessage('RELOAD')))
+    );
   }
 });
