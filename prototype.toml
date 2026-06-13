@@ -1,0 +1,27 @@
+[project]
+name = "iCalendar Scheduler Viewer"
+version = "1.0.5"
+description = "iCalendar Scheduler Viewer Application"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "j35t312", email = "r2psycho@gmail.com" }
+]
+dependencies = [
+    "flet>=0.85.3"
+]
+
+[dependency-groups]
+dev = [
+    "flet-cli>=0.85.3",
+    "flet-desktop>=0.85.3",
+    "flet-web>=0.85.3",
+]
+
+[tool.flet]
+product = "iCalendar Viewer App"
+org = "com.mycompany"
+company = "j35t312"
+copyright = "Copyright (C) 2023-2026 by j35t312"
+
+[tool.flet.app]
