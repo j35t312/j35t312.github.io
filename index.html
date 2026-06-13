@@ -122,7 +122,126 @@
             color: #616161;
         }
 
-        #hidden-file-input, #hidden-date-input {
+        /* Inline Calendar Component */
+        .inline-calendar {
+            border: 1px solid #e0e0e0;
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .inline-calendar.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .cal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            background: var(--blue-accent);
+            color: #fff;
+        }
+
+        .cal-header .cal-month-label {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+
+        .cal-nav {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: transparent;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            color: #fff;
+            transition: background 0.15s;
+            padding: 0;
+        }
+
+        .cal-nav:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .cal-nav .material-icons {
+            font-size: 18px;
+        }
+
+        .cal-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+        }
+
+        .cal-dow {
+            text-align: center;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--grey-600);
+            padding: 6px 0 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .cal-day {
+            text-align: center;
+            padding: 5px 2px;
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 50%;
+            margin: 1px auto;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, color 0.15s;
+            position: relative;
+        }
+
+        .cal-day:hover:not(.empty):not(.selected) {
+            background: var(--blue-50);
+        }
+
+        .cal-day.empty {
+            cursor: default;
+        }
+
+        .cal-day.today:not(.selected) {
+            color: var(--blue-accent);
+            font-weight: 700;
+        }
+
+        .cal-day.selected {
+            background: var(--blue-accent);
+            color: #fff;
+            font-weight: 700;
+            border-radius: 50%;
+        }
+
+        .cal-day.has-event::after {
+            content: '';
+            position: absolute;
+            bottom: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: var(--green-800);
+        }
+
+        .cal-day.selected.has-event::after {
+            background: rgba(255,255,255,0.8);
+        }
+
+        #hidden-file-input {
             position: absolute;
             opacity: 0;
             pointer-events: none;
@@ -265,14 +384,19 @@
                 <span class="material-icons">upload_file</span>
                 Upload ICS
             </button>
-            <button class="action-btn" id="select-date-btn">
-                <span class="material-icons">date_range</span>
-                Choose Date
-            </button>
         </div>
 
         <input type="file" id="hidden-file-input" accept=".ics">
-        <input type="date" id="hidden-date-input" min="2025-01-01" max="2030-12-31">
+
+        <!-- Inline Calendar -->
+        <div class="inline-calendar disabled" id="inline-calendar">
+            <div class="cal-header">
+                <button class="cal-nav" id="cal-prev"><span class="material-icons">chevron_left</span></button>
+                <span class="cal-month-label" id="cal-month-label"></span>
+                <button class="cal-nav" id="cal-next"><span class="material-icons">chevron_right</span></button>
+            </div>
+            <div class="cal-grid" id="cal-grid"></div>
+        </div>
 
         <div class="status-label" id="status-label">Please upload an iCalendar (.ics) file to begin.</div>
         <hr class="divider">
@@ -321,12 +445,6 @@
                 this.uploadBtn = document.getElementById('upload-ics-btn');
                 this.uploadBtn.addEventListener('click', () => this.fileInput.click());
 
-                this.datePicker = document.getElementById('hidden-date-input');
-                this.datePicker.addEventListener('change', (e) => this.onDateSelected(e));
-
-                this.selectDateBtn = document.getElementById('select-date-btn');
-                this.selectDateBtn.addEventListener('click', () => this.openDatePicker());
-
                 this.statusLabel = document.getElementById('status-label');
                 this.refreshBtn = document.getElementById('refresh-btn');
                 this.refreshBtn.addEventListener('click', (e) => this.triggerRefresh(e));
@@ -337,25 +455,93 @@
                 this.dateHeader = document.getElementById('date-header');
                 this.detailsColumn = document.getElementById('details-column');
 
-                this.selectDateBtn.disabled = true;
-                this.selectDateBtn.style.opacity = '0.5';
-                this.selectDateBtn.style.cursor = 'not-allowed';
+                // Inline calendar elements
+                this.inlineCal = document.getElementById('inline-calendar');
+                this.calMonthLabel = document.getElementById('cal-month-label');
+                this.calGrid = document.getElementById('cal-grid');
+                document.getElementById('cal-prev').addEventListener('click', () => this._calChangeMonth(-1));
+                document.getElementById('cal-next').addEventListener('click', () => this._calChangeMonth(1));
+
+                // Track which month the calendar is showing
+                this._calViewYear = this.currentSelectedDate.getFullYear();
+                this._calViewMonth = this.currentSelectedDate.getMonth();
+
+                this._renderCalendar();
+
+                // Keep calendar disabled until file is ready
+                this.inlineCal.classList.add('disabled');
             }
 
-            openDatePicker() {
-                if (typeof this.datePicker.showPicker === 'function') {
-                    this.datePicker.showPicker();
-                } else {
-                    this.datePicker.focus();
-                    this.datePicker.click();
+            _calChangeMonth(delta) {
+                this._calViewMonth += delta;
+                if (this._calViewMonth > 11) { this._calViewMonth = 0; this._calViewYear++; }
+                if (this._calViewMonth < 0) { this._calViewMonth = 11; this._calViewYear--; }
+                this._renderCalendar();
+            }
+
+            _renderCalendar() {
+                const year = this._calViewYear;
+                const month = this._calViewMonth;
+
+                const monthNames = ['January','February','March','April','May','June',
+                                    'July','August','September','October','November','December'];
+                this.calMonthLabel.textContent = monthNames[month] + ' ' + year;
+
+                const today = new Date();
+                today.setHours(0,0,0,0);
+
+                const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                const selY = this.currentSelectedDate.getFullYear();
+                const selM = this.currentSelectedDate.getMonth();
+                const selD = this.currentSelectedDate.getDate();
+
+                // Build grid HTML
+                const dows = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+                let html = dows.map(d => `<div class="cal-dow">${d}</div>`).join('');
+
+                // Leading empty cells
+                for (let i = 0; i < firstDay; i++) {
+                    html += `<div class="cal-day empty"></div>`;
                 }
+
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const thisDate = new Date(year, month, d);
+                    const dateKey = this._formatDateInTimezone(thisDate, this.localTz);
+                    const isToday = (thisDate.getTime() === today.getTime());
+                    const isSelected = (year === selY && month === selM && d === selD);
+                    const hasEvent = !!this.eventsByDate[dateKey];
+
+                    let cls = 'cal-day';
+                    if (isToday) cls += ' today';
+                    if (isSelected) cls += ' selected';
+                    if (hasEvent) cls += ' has-event';
+
+                    html += `<div class="${cls}" data-date="${dateKey}">${d}</div>`;
+                }
+
+                this.calGrid.innerHTML = html;
+
+                // Attach click listeners
+                this.calGrid.querySelectorAll('.cal-day:not(.empty)').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const parts = el.dataset.date.split('-');
+                        const clicked = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                        this.currentSelectedDate = clicked;
+                        this._renderCalendar();
+                        this.displayShiftsForDate(clicked, true);
+                    });
+                });
             }
 
             triggerRefresh(e) {
-                this.datePicker.value = '';
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
                 this.currentSelectedDate = today;
+                this._calViewYear = today.getFullYear();
+                this._calViewMonth = today.getMonth();
+                this._renderCalendar();
                 
                 if (Object.keys(this.eventsByDate).length > 0) {
                     this.statusLabel.textContent = "Refreshed view to today's date.";
@@ -366,14 +552,16 @@
             }
 
             exitApplication(e) {
-                this.datePicker.value = '';
                 this.fileInput.value = ''; 
                 this.eventsByDate = {}; 
-                this.currentSelectedDate = new Date(); 
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                this.currentSelectedDate = today;
+                this._calViewYear = today.getFullYear();
+                this._calViewMonth = today.getMonth();
                 
-                this.selectDateBtn.disabled = true;
-                this.selectDateBtn.style.opacity = '0.5';
-                this.selectDateBtn.style.cursor = 'not-allowed';
+                this.inlineCal.classList.add('disabled');
+                this._renderCalendar();
 
                 this.detailsColumn.innerHTML = '';
                 this.dateHeader.textContent = 'Select a date';
@@ -410,13 +598,15 @@
                         this.eventsByDate = temporaryEvents;
                         this.statusLabel.textContent = 'Loaded ' + calendar.events.length + ' shifts from "' + file.name + '"';
 
-                        this.selectDateBtn.disabled = false;
-                        this.selectDateBtn.style.opacity = '1';
-                        this.selectDateBtn.style.cursor = 'pointer';
+                        // Enable the inline calendar
+                        this.inlineCal.classList.remove('disabled');
 
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);
                         this.currentSelectedDate = today;
+                        this._calViewYear = today.getFullYear();
+                        this._calViewMonth = today.getMonth();
+                        this._renderCalendar();
                         
                         this.displayShiftsForDate(this.currentSelectedDate, false);
                     } catch (err) {
@@ -425,24 +615,6 @@
                     }
                 };
                 reader.readAsText(file);
-            }
-
-            onDateSelected(e) {
-                let selectedValue = e.target ? e.target.value : this.datePicker.value;
-                if (!selectedValue) return;
-
-                if (typeof selectedValue === 'string') {
-                    try {
-                        const parts = selectedValue.split('-');
-                        if (parts.length === 3) {
-                            selectedValue = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-                        } else {
-                            selectedValue = new Date(selectedValue.replace('Z', '+00:00'));
-                        }
-                    } catch (parseErr) { return; }
-                }
-                this.currentSelectedDate = selectedValue;
-                this.displayShiftsForDate(selectedValue, true);
             }
 
             displayShiftsForDate(targetDate, explicitUpdate) {
@@ -515,7 +687,6 @@
             if ('serviceWorker' in navigator) {
                 let refreshing = false;
 
-                // Listen for controllerchange. When a new service worker claims control, reload the app.
                 navigator.serviceWorker.addEventListener('controllerchange', () => {
                     if (!refreshing) {
                         refreshing = true;
@@ -527,11 +698,8 @@
                     navigator.serviceWorker.register('./sw.js')
                         .then((reg) => {
                             console.log('Service Worker registered. Scope:', reg.scope);
+                            setInterval(() => { reg.update(); }, 60000 * 5);
 
-                            // Check for updates on an interval or tab focus
-                            setInterval(() => { reg.update(); }, 60000 * 5); // check every 5 minutes
-
-                            // Handle update logic if a service worker is waiting
                             if (reg.waiting) {
                                 reg.waiting.postMessage('SKIP_WAITING');
                             }
@@ -540,7 +708,6 @@
                                 const newWorker = reg.installing;
                                 newWorker.addEventListener('statechange', () => {
                                     if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                        // New code version is fully cached. Tell it to take control.
                                         newWorker.postMessage('SKIP_WAITING');
                                     }
                                 });
