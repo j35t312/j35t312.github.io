@@ -1,6 +1,6 @@
 // ---- Service Worker — Barebones Cache-First PWA ----
 // Bump APP_VERSION to match index.html whenever you deploy changes.
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.7';
 const CACHE_NAME = `sched-viewer-${APP_VERSION}`;
 
 const PRECACHE_ASSETS = [

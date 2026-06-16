@@ -14,6 +14,11 @@
       "purpose": "any maskable"
     }
   ],
+  "author": {
+    "name": "Roel Rivera",
+    "url": "https://github.com/j35t312/j35t312.github.io",
+    "email": "r2psycho@gmail.com"
+  },
   "start_url": "./index.html",
   "background_color": "#ffffff",
   "theme_color": "#448AFF",
